@@ -37,5 +37,14 @@
     "@capacitor-community/sqlite": "^7.0.0",
     "dexie": "^4.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/droes19/sqlitebridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/droes19/sqlitebridge/issues"
+  },
+  "homepage": "https://github.com/droes19/sqlitebridge#readme",
+  "author": "Idrus Al Kaafi <droes19.al@gmail.com>"
 }
