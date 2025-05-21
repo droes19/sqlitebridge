@@ -1,13 +1,40 @@
+/**
+ * Query Method Generator
+ * 
+ * This module generates TypeScript methods for SQL queries defined in query files.
+ * It analyzes the query structure and creates appropriately typed methods with
+ * parameters that match the query requirements.
+ * 
+ * @packageDocumentation
+ */
+
 import { QueryInfo } from '../../types';
 
 /**
- * Generate TypeScript method for a named query
- * @param queryName Name of the query
- * @param query SQL query
- * @param queryInfo Analysis of the query
- * @param modelName Name of the model
- * @param defaultTableName Default table name to use if not specified
- * @returns Generated TypeScript method
+ * Generate TypeScript method for a named query.
+ * 
+ * This function analyzes an SQL query and generates a TypeScript method with
+ * appropriate parameter types and return types based on the query structure.
+ * 
+ * @param queryName - Name of the query from SQL comment
+ * @param query - SQL query string
+ * @param queryInfo - Analysis of the query
+ * @param modelName - Name of the model
+ * @param defaultTableName - Default table name to use if not specified
+ * @param withDexie - Whether to include Dexie.js support
+ * @returns Generated TypeScript method as a string
+ * 
+ * @example
+ * ```typescript
+ * const methodCode = generateQueryMethod(
+ *   'findByEmail',
+ *   'SELECT * FROM users WHERE email = ? LIMIT 1',
+ *   queryInfo,
+ *   'User',
+ *   'users',
+ *   true
+ * );
+ * ```
  */
 export function generateQueryMethod(
     queryName: string,
@@ -23,33 +50,76 @@ export function generateQueryMethod(
     let methodName = queryName;
     let methodParams = '';
     let methodBody = '';
-    let returnType = '';
     let paramNames: string[] = [];
 
     // Determine return type based on query type
-    if (queryInfo.type === 'select') {
-        if (queryInfo.returnsMultiple) {
-            returnType = `Promise<${interfaceName}[]>`;
-        } else {
-            returnType = `Promise<${interfaceName} | null>`;
-        }
-    } else if (queryInfo.type === 'insert') {
-        returnType = 'Promise<number | undefined>';
-    } else {
-        returnType = 'Promise<boolean>';
-    }
-
-    // Special case for COUNT or aggregates
-    if (queryInfo.type === 'select' && query.toUpperCase().includes('COUNT(')) {
-        returnType = 'Promise<any[]>';
-    }
+    const returnType = determineReturnType(queryInfo, interfaceName, query);
 
     // Build method parameters with better names
+    methodParams = generateMethodParameters(queryInfo, query, paramNames);
+
+    // Build method documentation
+    let documentation = generateMethodDocumentation(queryName, methodParams, queryInfo);
+
+    // Build method implementation
+    methodBody = `    try {\n`;
+    methodBody = withDexie ?
+        writeMethodWithDexie(methodBody, queryInfo, query, defaultTableName, paramNames, tableInterfaceName) :
+        writeMethod(methodBody, queryInfo, query, paramNames, tableInterfaceName, false);
+
+    methodBody += `    } catch (error) {\n`;
+    methodBody += `      console.error('Error executing ${queryName}:', error);\n`;
+    methodBody += `      throw error;\n`;
+    methodBody += `    }\n`;
+
+    return documentation + `  async ${methodName}(${methodParams}): ${returnType} {\n${methodBody}  }\n`;
+}
+
+/**
+ * Determines the appropriate return type for a query method.
+ * 
+ * @param queryInfo - Analysis of the query
+ * @param interfaceName - Name of the model interface
+ * @param query - SQL query string
+ * @returns Return type as a string
+ * 
+ * @internal
+ */
+function determineReturnType(queryInfo: QueryInfo, interfaceName: string, query: string): string {
+    if (queryInfo.type === 'select') {
+        // Special case for COUNT or aggregates
+        if (query.toUpperCase().includes('COUNT(')) {
+            return 'Promise<any[]>';
+        } else if (queryInfo.returnsMultiple) {
+            return `Promise<${interfaceName}[]>`;
+        } else {
+            return `Promise<${interfaceName} | null>`;
+        }
+    } else if (queryInfo.type === 'insert') {
+        return 'Promise<number | undefined>';
+    } else {
+        return 'Promise<boolean>';
+    }
+}
+
+/**
+ * Generates method parameters based on query structure.
+ * 
+ * @param queryInfo - Analysis of the query
+ * @param query - SQL query string
+ * @param paramNames - Array to store parameter names (modified by reference)
+ * @returns Method parameters as a string
+ * 
+ * @internal
+ */
+function generateMethodParameters(
+    queryInfo: QueryInfo,
+    query: string,
+    paramNames: string[]
+): string {
     if (queryInfo.namedParams.length > 0) {
         // Use named parameters
-        methodParams = queryInfo.namedParams
-            .map(param => `${param}: any`)
-            .join(', ');
+        return queryInfo.namedParams.map(param => `${param}: any`).join(', ');
     } else if (queryInfo.positionalParams > 0) {
         // Check if WHERE clause contains columns we can use for naming
         const whereClause = query.match(/WHERE\s+(.*?)(?:ORDER BY|GROUP BY|LIMIT|$)/is);
@@ -86,35 +156,64 @@ export function generateQueryMethod(
             }
         }
 
-        methodParams = paramNames
-            .map((name, i) => `${name}: any`)
-            .join(', ');
+        return paramNames.map((name, i) => `${name}: any`).join(', ');
+    } else {
+        return '';
     }
+}
 
-    // Build method documentation
+/**
+ * Generates method documentation with JSDoc.
+ * 
+ * @param queryName - Name of the query
+ * @param methodParams - Method parameters string
+ * @param queryInfo - Analysis of the query
+ * @returns Generated documentation as a string
+ * 
+ * @internal
+ */
+function generateMethodDocumentation(
+    queryName: string,
+    methodParams: string,
+    queryInfo: QueryInfo
+): string {
     let documentation = `  /**\n`;
     documentation += `   * ${queryName} - Custom query\n`;
     documentation += `   *\n`;
     if (methodParams) {
         documentation += `   * @param ${methodParams.replace(/: any/g, '')} Parameters for the query\n`;
     }
-    documentation += `   * @returns ${queryInfo.returnsMultiple ? 'Array of entities' : queryInfo.type === 'select' ? 'Entity or null' : queryInfo.type === 'insert' ? 'ID of inserted record' : 'Success indicator'}\n`;
+    
+    let returnDescription = '';
+    if (queryInfo.returnsMultiple) {
+        returnDescription = 'Array of entities';
+    } else if (queryInfo.type === 'select') {
+        returnDescription = 'Entity or null';
+    } else if (queryInfo.type === 'insert') {
+        returnDescription = 'ID of inserted record';
+    } else {
+        returnDescription = 'Success indicator';
+    }
+    
+    documentation += `   * @returns ${returnDescription}\n`;
     documentation += `   */\n`;
-
-    // Build method implementation
-    methodBody = `    try {\n`;
-    methodBody = withDexie ?
-        writeMethodWithDexie(methodBody, queryInfo, query, defaultTableName, paramNames, tableInterfaceName,) :
-        writeMethod(methodBody, queryInfo, query, paramNames, tableInterfaceName, false);
-
-    methodBody += `    } catch (error) {\n`;
-    methodBody += `      console.error('Error executing ${queryName}:', error);\n`;
-    methodBody += `      throw error;\n`;
-    methodBody += `    }\n`;
-
-    return documentation + `  async ${methodName}(${methodParams}): ${returnType} {\n${methodBody}  }\n`;
+    
+    return documentation;
 }
 
+/**
+ * Writes method implementation with Dexie.js support.
+ * 
+ * @param methodBody - Current method body
+ * @param queryInfo - Analysis of the query
+ * @param query - SQL query string
+ * @param defaultTableName - Default table name
+ * @param paramNames - Array of parameter names
+ * @param tableInterfaceName - Name of the table interface
+ * @returns Updated method body as a string
+ * 
+ * @internal
+ */
 function writeMethodWithDexie(
     methodBody: string,
     queryInfo: QueryInfo,
@@ -122,7 +221,7 @@ function writeMethodWithDexie(
     defaultTableName: string = '',
     paramNames: string[],
     tableInterfaceName: string,
-) {
+): string {
     methodBody += `      if (this.databaseService.isNativeDatabase()) {\n`;
     methodBody = writeMethod(methodBody, queryInfo, query, paramNames, tableInterfaceName, true);
 
@@ -189,6 +288,19 @@ function writeMethodWithDexie(
     return methodBody;
 }
 
+/**
+ * Writes method implementation for SQLite.
+ * 
+ * @param methodBody - Current method body
+ * @param queryInfo - Analysis of the query
+ * @param query - SQL query string
+ * @param paramNames - Array of parameter names
+ * @param tableInterfaceName - Name of the table interface
+ * @param withDexie - Whether this is part of a Dexie method
+ * @returns Updated method body as a string
+ * 
+ * @internal
+ */
 function writeMethod(
     methodBody: string,
     queryInfo: QueryInfo,
@@ -196,7 +308,7 @@ function writeMethod(
     paramNames: string[],
     tableInterfaceName: string,
     withDexie: boolean
-) {
+): string {
     let withDexieSpace = withDexie ? " ".repeat(2) : "";
     methodBody += `${withDexieSpace}      // SQLite implementation\n`;
     methodBody += `${withDexieSpace}      const result = await this.databaseService.${queryInfo.type === 'select' ? 'executeQuery' : 'executeCommand'}(\n`;
@@ -237,5 +349,5 @@ function writeMethod(
     } else {
         methodBody += `${withDexieSpace}      return result.changes?.changes > 0;\n`;
     }
-    return methodBody
+    return methodBody;
 }

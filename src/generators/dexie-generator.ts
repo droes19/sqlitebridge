@@ -3,11 +3,19 @@ import * as utils from '../utils';
 import { FileInfo, TableDefinition, Version } from '../types';
 
 /**
- * Process SQL migration files and generate Dexie.js migration array
- * @param directoryPath Path to the directory containing migration files
- * @param outputPath Path where the output file will be written
- * @param pattern Regular expression pattern to match migration files
- * @returns void
+ * Processes SQL migration files and generates a Dexie.js schema and database class.
+ * This allows the application to work with the same database schema on web platforms
+ * where SQLite is not available natively.
+ *
+ * @param directoryPath - Path to directory containing migration SQL files
+ * @param outputPath - Path where the output Dexie schema file will be written
+ * @param pattern - RegExp pattern to match migration files (default: /^V\d+__.+\.sql$/)
+ * 
+ * @example
+ * ```typescript
+ * // Generate Dexie schema from migrations in the migrations folder
+ * generateDexieMigrationFromDir('./migrations', './src/app/database/dexie-schema.ts');
+ * ```
  */
 export function generateDexieMigrationFromDir(
     directoryPath: string,
@@ -15,7 +23,7 @@ export function generateDexieMigrationFromDir(
     pattern: RegExp = /^V\d+__.+\.sql$/
 ): void {
     try {
-        // Check if directory exists
+        // Validate directory exists
         if (!utils.checkDirExists(directoryPath)) {
             console.error(`Error: ${directoryPath} is not a valid directory.`);
             return;
@@ -89,9 +97,13 @@ export function generateDexieMigrationFromDir(
 }
 
 /**
- * Process parsed files to extract versions with proper column tracking
- * @param parsedFiles Array of parsed file information
+ * Processes parsed files to extract versions with proper column tracking.
+ * This function builds the complete database schema evolution across versions.
+ * 
+ * @param parsedFiles - Array of parsed file information containing tables and alterations
  * @returns Array of version objects with complete schemas
+ * 
+ * @internal
  */
 function processFilesToVersions(parsedFiles: FileInfo[]): Version[] {
     // This is a more careful implementation of version tracking
@@ -181,9 +193,13 @@ function processFilesToVersions(parsedFiles: FileInfo[]): Version[] {
 }
 
 /**
- * Generate Dexie schema structure for all versions
- * @param versions Array of version objects with tables
- * @returns Generated migration array content
+ * Generate Dexie schema structure for all versions.
+ * Creates a TypeScript file with a Dexie database class.
+ * 
+ * @param versions - Array of version objects with tables
+ * @returns Generated migration array content as a string
+ * 
+ * @internal
  */
 function generateDexieMigrationArray(versions: Version[]): string {
     let output = `// Auto-generated Dexie.js database class from SQLite migrations\n`;
@@ -201,9 +217,13 @@ function generateDexieMigrationArray(versions: Version[]): string {
 }
 
 /**
- * Generate a Dexie database class without interfaces
- * @param versions Array of version objects with tables
- * @returns Generated database class content
+ * Generate a Dexie database class without interfaces.
+ * The class includes version definitions for all migrations.
+ * 
+ * @param versions - Array of version objects with tables
+ * @returns Generated database class content as a string
+ * 
+ * @internal
  */
 function generateDexieDatabaseClass(versions: Version[]): string {
     if (!versions || versions.length === 0) {
@@ -271,46 +291,3 @@ function generateDexieDatabaseClass(versions: Version[]): string {
 
     return output;
 }
-//
-///**
-// * Process a single SQL file and generate Dexie.js migration
-// * @param sqlFilePath Path to the SQL file
-// * @param outputPath Path where the output file will be written
-// * @returns void
-// */
-//export function generateDexieMigrationFromFile(sqlFilePath: string, outputPath: string): void {
-//    try {
-//        const sqlContent = utils.readSqlFile(sqlFilePath);
-//        if (!sqlContent) return;
-//
-//        console.log(`Processing file: ${sqlFilePath}`);
-//
-//        const fileName = path.basename(sqlFilePath);
-//
-//        // Parse CREATE TABLE statements
-//        const { tables } = utils.parseCreateTableStatements(sqlContent, fileName);
-//
-//        // Parse ALTER TABLE statements
-//        utils.parseAlterTableStatements(sqlContent, tables, fileName);
-//
-//        // Create a single version with all tables
-//        const versions: Version[] = [
-//            {
-//                version: 1,
-//                tables
-//            }
-//        ];
-//
-//        // Generate Dexie migration array
-//        const migrationContent = generateDexieMigrationArray(versions);
-//
-//        // Write output file
-//        if (utils.writeToFile(outputPath, migrationContent)) {
-//            console.log(`\nSuccessfully generated Dexie migration version.`);
-//            console.log(`Generated schema for ${tables.length} tables.`);
-//            console.log(`Output written to: ${outputPath}`);
-//        }
-//    } catch (error) {
-//        console.error('Error generating Dexie migration:', error);
-//    }
-//}
