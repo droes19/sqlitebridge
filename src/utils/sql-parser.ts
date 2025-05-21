@@ -1,16 +1,28 @@
 import { Alteration, ColumnDefinition, EnumDefinition, ForeignKey, SchemaInfo, TableDefinition } from "../types";
 import { sqliteToTypeScriptType } from "./type-mapping";
 
+/**
+ * Result interface for Create Table parsing operation
+ * @internal
+ */
 interface CreateTableResult {
     tables: TableDefinition[];
     enums: EnumDefinition[];
 }
 
 /**
- * Parse CREATE TABLE statements from SQL content
- * @param sqlContent SQL content to parse
- * @param fileName Name of the source file (for reference)
+ * Parses CREATE TABLE statements from SQL content to extract table definitions,
+ * column information, and relationships between tables.
+ * 
+ * @param sqlContent - SQL content to parse
+ * @param fileName - Name of the source file (for reference)
  * @returns Object containing tables and enums arrays
+ * 
+ * @example
+ * ```typescript
+ * const { tables, enums } = parseCreateTableStatements(sqlContent, 'V1__initial_schema.sql');
+ * // Process table definitions...
+ * ```
  */
 export function parseCreateTableStatements(sqlContent: string | null, fileName: string): CreateTableResult {
     const tables: TableDefinition[] = [];
@@ -36,43 +48,13 @@ export function parseCreateTableStatements(sqlContent: string | null, fileName: 
         }
 
         // Find the matching closing parenthesis, accounting for nested parentheses
-        let endPos = openParenPos + 1;
-        let parenLevel = 1;
-        let inQuotes = false;
-        let quoteChar = '';
-
-        while (endPos < sqlContent.length && parenLevel > 0) {
-            const char = sqlContent[endPos];
-
-            // Handle quotes
-            if ((char === '"' || char === "'" || char === '`') && (endPos === 0 || sqlContent[endPos - 1] !== '\\')) {
-                if (inQuotes && char === quoteChar) {
-                    inQuotes = false;
-                } else if (!inQuotes) {
-                    inQuotes = true;
-                    quoteChar = char;
-                }
-            }
-
-            // Handle parentheses - only if not in quotes
-            if (!inQuotes) {
-                if (char === '(') {
-                    parenLevel++;
-                } else if (char === ')') {
-                    parenLevel--;
-                }
-            }
-
-            endPos++;
-        }
-
-        // Extract the full table content between the parentheses
-        if (endPos <= openParenPos + 1 || parenLevel > 0) {
+        const tableDefinition = findMatchingParenthesis(sqlContent, openParenPos);
+        if (!tableDefinition.success) {
             console.error(`Error: Could not find closing parenthesis for table ${tableName}`);
-            continue; // Skip this table if we couldn't find the closing parenthesis
+            continue;
         }
 
-        const tableContentStr = sqlContent.substring(openParenPos + 1, endPos - 1);
+        const tableContentStr = sqlContent.substring(openParenPos + 1, tableDefinition.endPos - 1);
 
         // Parse columns
         const columns: ColumnDefinition[] = [];
@@ -99,116 +81,31 @@ export function parseCreateTableStatements(sqlContent: string | null, fileName: 
 
             // Handle FOREIGN KEY constraints
             if (columnStr.toUpperCase().startsWith('FOREIGN KEY')) {
-                const fkMatch = columnStr.match(/FOREIGN\s+KEY\s*\(\s*["'`]?(\w+)["'`]?\s*\)\s*REFERENCES\s+["'`]?(\w+)["'`]?\s*\(\s*["'`]?(\w+)["'`]?\s*\)/i);
-                if (fkMatch) {
-                    foreignKeys.push({
-                        column: fkMatch[1],
-                        referenceTable: fkMatch[2],
-                        referenceColumn: fkMatch[3]
-                    });
-                    // Foreign key columns should be indexed in Dexie
-                    if (!indexedColumns.includes(fkMatch[1])) {
-                        indexedColumns.push(fkMatch[1]);
-                    }
-                }
+                parseForeignKeyConstraint(columnStr, foreignKeys, indexedColumns);
                 return;
             }
 
             // Handle PRIMARY KEY constraints
             if (columnStr.toUpperCase().startsWith('PRIMARY KEY')) {
-                const pkMatch = columnStr.match(/PRIMARY\s+KEY\s*\(\s*(.*?)\s*\)/i);
-                if (pkMatch) {
-                    const pkColumns = pkMatch[1].split(',').map(col =>
-                        col.trim().replace(/["'`]/g, '')
-                    );
-                    primaryKeyColumns.push(...pkColumns);
-                }
+                parsePrimaryKeyConstraint(columnStr, primaryKeyColumns);
                 return;
             }
 
             // Skip other constraints that aren't column definitions
-            if (columnStr.toUpperCase().startsWith('CONSTRAINT') ||
-                columnStr.toUpperCase().startsWith('UNIQUE') ||
-                columnStr.toUpperCase().startsWith('CHECK')) {
+            if (isConstraintDefinition(columnStr)) {
                 return;
             }
 
             // Parse regular column definitions
-            const colMatch = columnStr.match(/["'`]?(\w+)["'`]?\s+([^]+)/);
-            if (colMatch) {
-                const columnName = colMatch[1];
-                const columnDef = colMatch[2].trim();
-
-                // Get the SQL type from the first word
-                const typeParts = columnDef.split(/\s+/);
-                const sqlType = typeParts[0];
-
-                const tsType = sqliteToTypeScriptType(sqlType);
-                const isPrimaryKey = columnDef.toUpperCase().includes('PRIMARY KEY');
-                const isNotNull = columnDef.toUpperCase().includes('NOT NULL');
-                const isUnique = columnDef.toUpperCase().includes('UNIQUE');
-                const isAutoIncrement = columnDef.toUpperCase().includes('AUTOINCREMENT');
-
-                // Extract DEFAULT value, handling complex expressions with parentheses
-                let defaultValue: string | undefined;
-
-                // Handle cases with nested parentheses like DEFAULT (datetime ('now', 'localtime'))
-                const defaultMatch = columnDef.match(/DEFAULT\s+(.+)$/i);
-                if (defaultMatch) {
-                    defaultValue = defaultMatch[1].trim();
-                }
-
-                if (isPrimaryKey) {
-                    primaryKeyColumns.push(columnName);
-                }
-
-                // In Dexie, PRIMARY KEY columns and UNIQUE columns should be indexed
-                if (isPrimaryKey || isUnique) {
-                    if (!indexedColumns.includes(columnName)) {
-                        indexedColumns.push(columnName);
-                    }
-                }
-
-                // Also add foreign key-like columns (ending with _id) to indexedColumns
-                if (columnName.endsWith('_id') && !indexedColumns.includes(columnName)) {
-                    indexedColumns.push(columnName);
-                }
-
-                columns.push({
-                    name: columnName,
-                    sqlType: sqlType,
-                    tsType: tsType,
-                    isPrimaryKey: isPrimaryKey,
-                    isNullable: !isNotNull && !isPrimaryKey,
-                    isUnique: isUnique,
-                    isAutoIncrement: isAutoIncrement,
-                    defaultValue: defaultValue
-                });
-            }
+            parseColumnDefinition(columnStr, columns, indexedColumns);
         });
 
         // Set the primary key flag for columns that are in the PRIMARY KEY constraint
-        columns.forEach(col => {
-            if (primaryKeyColumns.includes(col.name)) {
-                col.isPrimaryKey = true;
-            }
-        });
+        applyPrimaryKeyFlags(columns, primaryKeyColumns);
 
         // Check for enum-like tables (simple tables with id and name/value columns)
-        if (columns.length === 2 &&
-            columns.some(col => col.name.toLowerCase() === 'id' && col.isPrimaryKey) &&
-            columns.some(col => ['name', 'value', 'label', 'code'].includes(col.name.toLowerCase()))) {
-            const nameColumn = columns.find(col =>
-                ['name', 'value', 'label', 'code'].includes(col.name.toLowerCase())
-            );
-
-            // Add to enums
-            if (nameColumn) {
-                enums.push({
-                    name: tableName,
-                    //valueCol: nameColumn.name
-                });
-            }
+        if (isEnumLikeTable(columns)) {
+            enums.push({ name: tableName });
         }
 
         tables.push({
@@ -221,11 +118,209 @@ export function parseCreateTableStatements(sqlContent: string | null, fileName: 
     }
 
     return { tables, enums };
-};
+}
 
 /**
- * @param input Input string
+ * Finds matching closing parenthesis in SQL text.
+ * 
+ * @param sqlContent - SQL content to search
+ * @param openParenPos - Position of the opening parenthesis
+ * @returns Object with success flag and end position
+ * 
+ * @internal
+ */
+function findMatchingParenthesis(sqlContent: string, openParenPos: number): { success: boolean; endPos: number } {
+    let endPos = openParenPos + 1;
+    let parenLevel = 1;
+    let inQuotes = false;
+    let quoteChar = '';
+
+    while (endPos < sqlContent.length && parenLevel > 0) {
+        const char = sqlContent[endPos];
+
+        // Handle quotes
+        if ((char === '"' || char === "'" || char === '`') && (endPos === 0 || sqlContent[endPos - 1] !== '\\')) {
+            if (inQuotes && char === quoteChar) {
+                inQuotes = false;
+            } else if (!inQuotes) {
+                inQuotes = true;
+                quoteChar = char;
+            }
+        }
+
+        // Handle parentheses - only if not in quotes
+        if (!inQuotes) {
+            if (char === '(') {
+                parenLevel++;
+            } else if (char === ')') {
+                parenLevel--;
+            }
+        }
+
+        endPos++;
+    }
+
+    return {
+        success: endPos > openParenPos + 1 && parenLevel === 0,
+        endPos: endPos
+    };
+}
+
+/**
+ * Checks if a column definition is actually a constraint definition.
+ * 
+ * @param columnStr - The column definition string to check
+ * @returns True if it's a constraint definition, false otherwise
+ * 
+ * @internal
+ */
+function isConstraintDefinition(columnStr: string): boolean {
+    return columnStr.toUpperCase().startsWith('CONSTRAINT') ||
+        columnStr.toUpperCase().startsWith('UNIQUE') ||
+        columnStr.toUpperCase().startsWith('CHECK');
+}
+
+/**
+ * Parses a FOREIGN KEY constraint definition.
+ * 
+ * @param columnStr - The constraint definition string
+ * @param foreignKeys - Array to add the parsed foreign key to
+ * @param indexedColumns - Array to add indexed columns to
+ * 
+ * @internal
+ */
+function parseForeignKeyConstraint(columnStr: string, foreignKeys: ForeignKey[], indexedColumns: string[]): void {
+    const fkMatch = columnStr.match(/FOREIGN\s+KEY\s*\(\s*["'`]?(\w+)["'`]?\s*\)\s*REFERENCES\s+["'`]?(\w+)["'`]?\s*\(\s*["'`]?(\w+)["'`]?\s*\)/i);
+    if (fkMatch) {
+        foreignKeys.push({
+            column: fkMatch[1],
+            referenceTable: fkMatch[2],
+            referenceColumn: fkMatch[3]
+        });
+        // Foreign key columns should be indexed in Dexie
+        if (!indexedColumns.includes(fkMatch[1])) {
+            indexedColumns.push(fkMatch[1]);
+        }
+    }
+}
+
+/**
+ * Parses a PRIMARY KEY constraint definition.
+ * 
+ * @param columnStr - The constraint definition string
+ * @param primaryKeyColumns - Array to add primary key columns to
+ * 
+ * @internal
+ */
+function parsePrimaryKeyConstraint(columnStr: string, primaryKeyColumns: string[]): void {
+    const pkMatch = columnStr.match(/PRIMARY\s+KEY\s*\(\s*(.*?)\s*\)/i);
+    if (pkMatch) {
+        const pkColumns = pkMatch[1].split(',').map(col =>
+            col.trim().replace(/["'`]/g, '')
+        );
+        primaryKeyColumns.push(...pkColumns);
+    }
+}
+
+/**
+ * Parses a column definition and adds it to the columns array.
+ * 
+ * @param columnStr - The column definition string
+ * @param columns - Array to add the parsed column to
+ * @param indexedColumns - Array to add indexed columns to
+ * 
+ * @internal
+ */
+function parseColumnDefinition(columnStr: string, columns: ColumnDefinition[], indexedColumns: string[]): void {
+    const colMatch = columnStr.match(/["'`]?(\w+)["'`]?\s+([^]+)/);
+    if (colMatch) {
+        const columnName = colMatch[1];
+        const columnDef = colMatch[2].trim();
+
+        // Get the SQL type from the first word
+        const typeParts = columnDef.split(/\s+/);
+        const sqlType = typeParts[0];
+
+        const tsType = sqliteToTypeScriptType(sqlType);
+        const isPrimaryKey = columnDef.toUpperCase().includes('PRIMARY KEY');
+        const isNotNull = columnDef.toUpperCase().includes('NOT NULL');
+        const isUnique = columnDef.toUpperCase().includes('UNIQUE');
+        const isAutoIncrement = columnDef.toUpperCase().includes('AUTOINCREMENT');
+
+        // Extract DEFAULT value
+        let defaultValue: string | undefined;
+        const defaultMatch = columnDef.match(/DEFAULT\s+(.+)$/i);
+        if (defaultMatch) {
+            defaultValue = defaultMatch[1].trim();
+        }
+
+        // In Dexie, PRIMARY KEY columns and UNIQUE columns should be indexed
+        if (isPrimaryKey || isUnique) {
+            if (!indexedColumns.includes(columnName)) {
+                indexedColumns.push(columnName);
+            }
+        }
+
+        // Also add foreign key-like columns (ending with _id) to indexedColumns
+        if (columnName.endsWith('_id') && !indexedColumns.includes(columnName)) {
+            indexedColumns.push(columnName);
+        }
+
+        columns.push({
+            name: columnName,
+            sqlType: sqlType,
+            tsType: tsType,
+            isPrimaryKey: isPrimaryKey,
+            isNullable: !isNotNull && !isPrimaryKey,
+            isUnique: isUnique,
+            isAutoIncrement: isAutoIncrement,
+            defaultValue: defaultValue
+        });
+    }
+}
+
+/**
+ * Sets the isPrimaryKey flag on columns that are part of the primary key.
+ * 
+ * @param columns - Array of columns to update
+ * @param primaryKeyColumns - Array of primary key column names
+ * 
+ * @internal
+ */
+function applyPrimaryKeyFlags(columns: ColumnDefinition[], primaryKeyColumns: string[]): void {
+    columns.forEach(col => {
+        if (primaryKeyColumns.includes(col.name)) {
+            col.isPrimaryKey = true;
+        }
+    });
+}
+
+/**
+ * Checks if a table definition looks like an enum table.
+ * 
+ * @param columns - Array of columns to check
+ * @returns True if the table looks like an enum table
+ * 
+ * @internal
+ */
+function isEnumLikeTable(columns: ColumnDefinition[]): boolean {
+    return columns.length === 2 &&
+        columns.some(col => col.name.toLowerCase() === 'id' && col.isPrimaryKey) &&
+        columns.some(col => ['name', 'value', 'label', 'code'].includes(col.name.toLowerCase()));
+}
+
+/**
+ * Splits a string by commas, respecting parentheses and quotes.
+ * This is important for handling complex SQL expressions with nested parentheses.
+ * 
+ * @param input - Input string to split
  * @returns Array of split parts
+ * 
+ * @example
+ * ```typescript
+ * // Returns ["id INTEGER", "name TEXT", "created_at DEFAULT (datetime('now'))"]
+ * splitRespectingParentheses("id INTEGER, name TEXT, created_at DEFAULT (datetime('now'))");
+ * ```
  */
 export function splitRespectingParentheses(input: string): string[] {
     const result: string[] = [];
@@ -280,11 +375,18 @@ export function splitRespectingParentheses(input: string): string[] {
 }
 
 /**
- * Parse ALTER TABLE statements from SQL content
- * @param sqlContent SQL content to parse
- * @param schemaInfo Schema information containing tables and enums
- * @param fileName Name of the source file (for reference)
+ * Parses ALTER TABLE statements from SQL content to extract column alterations.
+ * 
+ * @param sqlContent - SQL content to parse
+ * @param schemaInfo - Schema information containing tables and enums, or an array of tables
+ * @param fileName - Name of the source file (for reference)
  * @returns Array of alteration objects
+ * 
+ * @example
+ * ```typescript
+ * const alterations = parseAlterTableStatements(sqlContent, schemaInfo, 'V2__add_columns.sql');
+ * // Process alterations...
+ * ```
  */
 export function parseAlterTableStatements(
     sqlContent: string | null,
@@ -351,61 +453,89 @@ export function parseAlterTableStatements(
             columnInfo
         });
 
-        // Find the table in existing tables to apply immediately for compatibility
-        let table: TableDefinition | null = null;
-
-        if (Array.isArray(schemaInfo)) {
-            table = schemaInfo.find(t => t.name === tableName) || null;
-        } else if (schemaInfo && schemaInfo.tables && schemaInfo.tables[tableName]) {
-            table = schemaInfo.tables[tableName];
-        }
-
-        // Skip if the table doesn't exist in our schema
-        if (!table) {
-            console.warn(`Warning: ALTER TABLE references table "${tableName}" which was not found in the current file. This will be applied in version processing if the table exists in a previous version.`);
-            continue;
-        }
-
-        // Check if column already exists in table before adding
-        const existingColumn = table.columns.find(col => col.name === columnName);
-        if (existingColumn) {
-            console.warn(`Warning: Column ${columnName} already exists in table ${tableName}. Skipping duplicate ALTER TABLE statement.`);
-            continue;
-        }
-
-        // In Dexie, PRIMARY KEY columns and UNIQUE columns should be indexed
-        if (isPrimaryKey || isUnique) {
-            if (!table.indexedColumns) {
-                table.indexedColumns = [];
-            }
-
-            if (!table.indexedColumns.includes(columnName)) {
-                table.indexedColumns.push(columnName);
-            }
-        }
-
-        // Also add foreign key-like columns (ending with _id) to indexedColumns
-        if (columnName.endsWith('_id')) {
-            if (!table.indexedColumns) {
-                table.indexedColumns = [];
-            }
-
-            if (!table.indexedColumns.includes(columnName)) {
-                table.indexedColumns.push(columnName);
-            }
-        }
-
-        // Add the new column to the table's schema
-        table.columns.push(columnInfo);
+        // Apply the alteration immediately to the schema if possible
+        applyAlterationToSchema(tableName, columnName, columnInfo, schemaInfo);
     }
 
     return alterations;
 }
 
 /**
- * Convert a table name to a TypeScript interface name
- * @param tableName Table name to convert
+ * Applies an alteration to the schema if the table exists.
+ * 
+ * @param tableName - Name of the table to alter
+ * @param columnName - Name of the column to add
+ * @param columnInfo - Column definition to add
+ * @param schemaInfo - Schema information containing tables and enums, or an array of tables
+ * 
+ * @internal
+ */
+function applyAlterationToSchema(
+    tableName: string,
+    columnName: string,
+    columnInfo: ColumnDefinition,
+    schemaInfo: SchemaInfo | TableDefinition[],
+): void {
+    // Find the table in existing tables to apply immediately for compatibility
+    let table: TableDefinition | null = null;
+
+    if (Array.isArray(schemaInfo)) {
+        table = schemaInfo.find(t => t.name === tableName) || null;
+    } else if (schemaInfo && schemaInfo.tables && schemaInfo.tables[tableName]) {
+        table = schemaInfo.tables[tableName];
+    }
+
+    // Skip if the table doesn't exist in our schema
+    if (!table) {
+        console.warn(`Warning: ALTER TABLE references table "${tableName}" which was not found in the current file. This will be applied in version processing if the table exists in a previous version.`);
+        return;
+    }
+
+    // Check if column already exists in table before adding
+    const existingColumn = table.columns.find(col => col.name === columnName);
+    if (existingColumn) {
+        console.warn(`Warning: Column ${columnName} already exists in table ${tableName}. Skipping duplicate ALTER TABLE statement.`);
+        return;
+    }
+
+    // In Dexie, PRIMARY KEY columns and UNIQUE columns should be indexed
+    if (columnInfo.isPrimaryKey || columnInfo.isUnique) {
+        if (!table.indexedColumns) {
+            table.indexedColumns = [];
+        }
+
+        if (!table.indexedColumns.includes(columnName)) {
+            table.indexedColumns.push(columnName);
+        }
+    }
+
+    // Also add foreign key-like columns (ending with _id) to indexedColumns
+    if (columnName.endsWith('_id')) {
+        if (!table.indexedColumns) {
+            table.indexedColumns = [];
+        }
+
+        if (!table.indexedColumns.includes(columnName)) {
+            table.indexedColumns.push(columnName);
+        }
+    }
+
+    // Add the new column to the table's schema
+    table.columns.push(columnInfo);
+}
+
+/**
+ * Converts a table name to a TypeScript interface name in PascalCase.
+ * For example, 'user_profiles' becomes 'UserProfile'.
+ * 
+ * @param tableName - Table name to convert
  * @returns TypeScript interface name in PascalCase
+ * 
+ * @example
+ * ```typescript
+ * const interfaceName = tableNameToInterfaceName('user_profiles');
+ * // Returns 'UserProfile'
+ * ```
  */
 export function tableNameToInterfaceName(tableName: string): string {
     // Handle common naming patterns
@@ -422,24 +552,40 @@ export function tableNameToInterfaceName(tableName: string): string {
         .split('_')
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join('');
-};
+}
 
 /**
- * Get file name from interface name
- * @param interfaceName Interface name to convert
+ * Converts an interface name to a file name in kebab-case.
+ * For example, 'UserProfile' becomes 'user-profile'.
+ * 
+ * @param interfaceName - Interface name to convert
  * @returns File name in kebab-case
+ * 
+ * @example
+ * ```typescript
+ * const fileName = interfaceNameToFileName('UserProfile');
+ * // Returns 'user-profile'
+ * ```
  */
 export function interfaceNameToFileName(interfaceName: string): string {
     // Convert PascalCase to kebab-case
     return interfaceName
         .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
         .toLowerCase();
-};
+}
 
 /**
- * Extract SQL queries from a migration file with special trigger handling
- * @param content SQL file content
+ * Extracts SQL queries from a migration file with special trigger handling.
+ * This function properly handles complex SQL syntax including triggers with BEGIN/END blocks.
+ * 
+ * @param content - SQL file content
  * @returns Array of SQL queries
+ * 
+ * @example
+ * ```typescript
+ * const queries = extractQueriesFromContent(sqlFileContent);
+ * // Process each query...
+ * ```
  */
 export const extractQueriesFromContent = (content: string | null): string[] => {
     if (!content) return [];
@@ -510,9 +656,12 @@ export const extractQueriesFromContent = (content: string | null): string[] => {
 };
 
 /**
- * Clean up a SQL query by removing excessive whitespace and normalizing indentation
- * @param query SQL query to format
+ * Cleans up a SQL query by removing excessive whitespace and normalizing indentation.
+ * 
+ * @param query - SQL query to format
  * @returns Formatted SQL query
+ * 
+ * @internal
  */
 export const formatSqlQuery = (query: string): string => {
     return query
@@ -527,9 +676,17 @@ export const formatSqlQuery = (query: string): string => {
 };
 
 /**
- * Generate Dexie schema string for a table
- * @param table Table definition
+ * Generates a Dexie schema string for a table definition.
+ * The schema string defines primary keys and indexes.
+ * 
+ * @param table - Table definition
  * @returns Dexie schema string
+ * 
+ * @example
+ * ```typescript
+ * const schemaString = generateDexieSchemaString(tableDefinition);
+ * // Returns something like "++id, name, email"
+ * ```
  */
 export function generateDexieSchemaString(table: TableDefinition): string {
     // Get primary key
@@ -615,4 +772,3 @@ export function generateDexieSchemaString(table: TableDefinition): string {
 
     return schemaString;
 }
-
