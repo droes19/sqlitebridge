@@ -1,6 +1,6 @@
 # SQLiteBridge
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 SQLiteBridge is a TypeScript toolkit for cross-platform SQLite database management in Ionic/Capacitor applications. It enables seamless development across mobile and web platforms by generating TypeScript models, Dexie.js schemas, and services from SQLite migrations.

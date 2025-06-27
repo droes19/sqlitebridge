@@ -123,7 +123,7 @@ function writeCreateWithDexie(
 	fields.forEach(field => {
 		if (utils.isValidFieldName(field.name)) {
 			if (field.name === field.camelCase) {
-				output += (`          ${field.name}: undefined,\n`);
+				output += (`          ${field.name}: ${field.name === primaryKey.name ? 'undefined' : `entityToInsert.${field.camelCase}`},\n`);
 			} else {
 				output += (`          ${field.name}: entityToInsert.${field.camelCase},\n`);
 			}
@@ -172,7 +172,7 @@ function writeCreate(
 	fields.forEach(field => {
 		if (utils.isValidFieldName(field.name)) {
 			if (field.name === field.camelCase) {
-				output += `${withDexieSpace}        ${field.name}: undefined,\n`;
+				output += `${withDexieSpace}        ${field.name}: ${field.name === primaryKey.name ? 'undefined' : `entityToInsert.${field.camelCase}`},\n`;
 			} else {
 				output += `${withDexieSpace}        ${field.name}: entityToInsert.${field.camelCase},\n`;
 			}

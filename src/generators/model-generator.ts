@@ -514,7 +514,7 @@ function generateModelProperties(table: TableDefinition, extendsBaseModel: boole
 
 		// Convert snake_case to camelCase for interface properties
 		const camelCaseName = column.name.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-		const optionalFlag = column.isNullable ? '?' : '';
+		const optionalFlag = column.isNullable || camelCaseName === "id" ? '?' : '';
 
 		// Generate property comment
 		output += generatePropertyComment(column);
@@ -547,7 +547,7 @@ function generateTableProperties(table: TableDefinition, extendsBaseModel: boole
 			return;
 		}
 
-		const optionalFlag = column.isNullable ? '?' : '';
+		const optionalFlag = column.isNullable || column.name === 'id' ? '?' : '';
 
 		// Generate property comment
 		output += generatePropertyComment(column);
