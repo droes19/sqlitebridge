@@ -1,6 +1,6 @@
 {
   "name": "sqlitebridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "SQLiteBridge: A TypeScript toolkit for cross-platform SQLite database management in Ionic/Capacitor applications. Generate TypeScript models, Dexie.js schemas, and services from SQLite migrations for seamless development across mobile and web platforms.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
