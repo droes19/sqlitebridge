@@ -1,6 +1,6 @@
 {
   "name": "sqlitebridge",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "SQLiteBridge: A TypeScript toolkit for cross-platform SQLite database management in Ionic/Capacitor applications. Generate TypeScript models, Dexie.js schemas, and services from SQLite migrations for seamless development across mobile and web platforms.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,8 +9,12 @@
   },
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build:bun": "bun build src/bin/sqlitebridge.ts --outdir dist --target bun",
+    "dev": "tsx src/bin/sqlitebridge.ts",
+    "dev:bun": "bun run src/bin/sqlitebridge.ts",
+    "test": "vitest",
+    "test:bun": "bun test",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "sqlite",
@@ -19,23 +23,29 @@
     "dexie",
     "model",
     "generator",
-    "service"
+    "service",
+    "bun",
+    "nodejs",
+    "react",
+    "angular"
   ],
   "engines": {
-    "node": ">=10.0.0"
+    "node": ">=16.0.0",
+    "bun": ">=1.0.0"
   },
   "dependencies": {
-    "@types/node": "^14.18.63",
-    "commander": "^14.0.0",
-    "fs-extra": "^10.1.0",
-    "typescript": "^4.9.5"
+    "commander": "^14.0.0"
   },
   "devDependencies": {
-    "ts-node": "^10.9.1"
+    "@types/bun": "^1.2.17",
+    "@types/node": "^24.0.7",
+    "typescript": "^5.8.3",
+    "tsx": "^4.20.3",
+    "vitest": "^3.2.4"
   },
   "peerDependencies": {
     "@capacitor-community/sqlite": "^7.0.0",
-    "dexie": "^4.0.0"
+    "dexie": "^4.0.11"
   },
   "license": "MIT",
   "repository": {

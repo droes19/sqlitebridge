@@ -29,11 +29,11 @@ import * as utils from "../utils";
  * processModelDirectory('./migrations', './src/app/models');
  * ```
  */
-export function processModelDirectory(
+export async function processModelDirectory(
 	directoryPath: string,
 	outputDir: string,
 	pattern: RegExp = /^V\d+__.+\.sql$/
-): void {
+): Promise<void> {
 	try {
 		// Validate input and create output directory
 		if (!validateDirectories(directoryPath, outputDir)) {
@@ -43,7 +43,7 @@ export function processModelDirectory(
 		console.log(`Processing migration files in ${directoryPath}...`);
 
 		// Get all SQL files in the directory
-		const files = utils.getSqlFilesInDirectory(directoryPath, pattern);
+		const files = await utils.getSqlFilesInDirectory(directoryPath, pattern);
 
 		if (files.length === 0) {
 			console.error(`No migration files matching the pattern ${pattern} found in ${directoryPath}.`);
@@ -53,7 +53,7 @@ export function processModelDirectory(
 		console.log(`Found ${files.length} migration files.`);
 
 		// Extract schema information from the migration files
-		const schemaInfo = extractSchemaFromMigrations(files, directoryPath);
+		const schemaInfo = await extractSchemaFromMigrations(files, directoryPath);
 
 		// Generate model files
 		generateModelFiles(schemaInfo, outputDir);
@@ -100,7 +100,7 @@ function validateDirectories(inputDir: string, outputDir: string): boolean {
  * 
  * @internal
  */
-function extractSchemaFromMigrations(files: string[], directoryPath: string): SchemaInfo {
+async function extractSchemaFromMigrations(files: string[], directoryPath: string): Promise<SchemaInfo> {
 	// Initialize schema info
 	const schemaInfo: SchemaInfo = {
 		tables: {},
@@ -108,11 +108,11 @@ function extractSchemaFromMigrations(files: string[], directoryPath: string): Sc
 	};
 
 	// Process each file in order
-	files.forEach(file => {
+	files.forEach(async (file) => {
 		const filePath = join(directoryPath, file);
 		console.log(`Processing: ${file}`);
 
-		const sqlContent = utils.readFile(filePath);
+		const sqlContent = await utils.readFile(filePath);
 		if (!sqlContent) return;
 
 		// First, parse CREATE TABLE statements
@@ -177,11 +177,11 @@ function generateModelFiles(schemaInfo: SchemaInfo, outputDir: string): void {
  * 
  * @internal
  */
-function generateBaseModelFile(outputDir: string): void {
+async function generateBaseModelFile(outputDir: string): Promise<void> {
 	const baseModelPath = join(outputDir, 'base.model.ts');
 	const baseModelContent = generateBaseModelContent();
 
-	if (utils.writeToFile(baseModelPath, baseModelContent)) {
+	if (await utils.writeToFile(baseModelPath, baseModelContent)) {
 		console.log(`Generated base model -> ${baseModelPath}`);
 	}
 }
@@ -196,12 +196,12 @@ function generateBaseModelFile(outputDir: string): void {
  * 
  * @internal
  */
-function generateTableModelFile(
+async function generateTableModelFile(
 	table: TableDefinition,
 	schemaInfo: SchemaInfo,
 	outputDir: string,
 	shouldExtendBaseModelBool: boolean
-): void {
+): Promise<void> {
 	const interfaceName = utils.tableNameToInterfaceName(table.name);
 	const fileName = utils.interfaceNameToFileName(interfaceName);
 	const filePath = join(outputDir, `${fileName}.ts`);
@@ -210,7 +210,7 @@ function generateTableModelFile(
 	const extendsBase = shouldExtendBaseModelBool && shouldExtendBaseModel(table);
 
 	const fileContent = generateTypeScriptModelForTable(table, schemaInfo, extendsBase);
-	if (utils.writeToFile(filePath, fileContent)) {
+	if (await utils.writeToFile(filePath, fileContent)) {
 		if (extendsBase) {
 			console.log(`Generated model for ${table.name} (extends BaseModel) -> ${filePath}`);
 		} else {
@@ -227,14 +227,14 @@ function generateTableModelFile(
  * 
  * @internal
  */
-function generateEnumFile(enumTable: EnumDefinition, outputDir: string): void {
+async function generateEnumFile(enumTable: EnumDefinition, outputDir: string): Promise<void> {
 	const enumName = enumTable.name.replace(/s$/, ''); // Remove trailing 's' if present
 	const pascalCaseName = enumName.charAt(0).toUpperCase() + enumName.slice(1);
 	const fileName = utils.interfaceNameToFileName(pascalCaseName);
 	const filePath = join(outputDir, `${fileName}.ts`);
 
 	const fileContent = generateEnumFileContent(enumTable);
-	if (utils.writeToFile(filePath, fileContent)) {
+	if (await utils.writeToFile(filePath, fileContent)) {
 		console.log(`Generated enum for ${enumTable.name} -> ${filePath}`);
 	}
 }
@@ -248,14 +248,14 @@ function generateEnumFile(enumTable: EnumDefinition, outputDir: string): void {
  * 
  * @internal
  */
-function generateIndexFile(
+async function generateIndexFile(
 	schemaInfo: SchemaInfo,
 	hasBaseModel: boolean,
 	outputDir: string
-): void {
+): Promise<void> {
 	const indexFilePath = join(outputDir, 'index.ts');
 	const indexFileContent = generateIndexFileContent(schemaInfo, hasBaseModel);
-	if (utils.writeToFile(indexFilePath, indexFileContent)) {
+	if (await utils.writeToFile(indexFilePath, indexFileContent)) {
 		console.log(`Generated index file -> ${indexFilePath}`);
 	}
 }
@@ -620,7 +620,7 @@ function generateForeignKeyComments(table: TableDefinition): string {
  * processModelFile('./migrations/V1__initial_schema.sql', './src/app/models');
  * ```
  */
-export function processModelFile(sqlFilePath: string, outputDir: string): void {
+export async function processModelFile(sqlFilePath: string, outputDir: string): Promise<void> {
 	try {
 		// Validate file and create output directory
 		if (!validateFile(sqlFilePath, outputDir)) {
@@ -632,7 +632,7 @@ export function processModelFile(sqlFilePath: string, outputDir: string): void {
 		const fileName = basename(sqlFilePath);
 
 		// Extract schema information from the file
-		const schemaInfo = extractSchemaFromFile(sqlFilePath, fileName);
+		const schemaInfo = await extractSchemaFromFile(sqlFilePath, fileName);
 
 		// Generate model files
 		generateModelFiles(schemaInfo, outputDir);
@@ -679,14 +679,14 @@ function validateFile(sqlFilePath: string, outputDir: string): boolean {
  * 
  * @internal
  */
-function extractSchemaFromFile(sqlFilePath: string, fileName: string): SchemaInfo {
+async function extractSchemaFromFile(sqlFilePath: string, fileName: string): Promise<SchemaInfo> {
 	// Initialize schema info
 	const schemaInfo: SchemaInfo = {
 		tables: {},
 		enums: []
 	};
 
-	const sqlContent = utils.readFile(sqlFilePath);
+	const sqlContent = await utils.readFile(sqlFilePath);
 	if (!sqlContent) return schemaInfo;
 
 	// Parse CREATE TABLE statements
