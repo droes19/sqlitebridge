@@ -54,7 +54,7 @@ export function writeDeleteMethod(
 	tableName: string,
 	primaryKey: any,
 	withDexie: boolean,
-	framework: FrameworkType = 'angular'
+	framework: FrameworkType
 ): string {
 	if (framework === 'react') {
 		return writeReactDeleteHook(

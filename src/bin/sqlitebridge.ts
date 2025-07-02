@@ -118,7 +118,7 @@ async function main() {
 				// Generate Dexie schema if enabled
 				if (optDexie) {
 					console.log('\nGenerating Dexie.js schema...');
-					await generateDexieMigrationFromDir(migrationsPath, dexie, migrationPattern);
+					await generateDexieMigrationFromDir(migrationsPath, dexie, migrationPattern, framework);
 				}
 
 				console.log('\nAll artifacts generated successfully!');
@@ -146,10 +146,10 @@ async function main() {
 
 				if (options.file) {
 					console.log(`Processing single file: ${options.file}`);
-					await processModelFile(options.file, outputDir);
+					await processModelFile(options.file, outputDir, framework);
 				} else {
 					console.log(`Processing migrations directory: ${migrationsPath}`);
-					await processModelDirectory(migrationsPath, outputDir, migrationPattern);
+					await processModelDirectory(migrationsPath, outputDir, migrationPattern, framework);
 				}
 
 				console.log('Model generation completed successfully');
@@ -171,7 +171,7 @@ async function main() {
 				console.log(`Generating migrations in: ${outputFile}`);
 				console.log(`Processing migrations directory: ${migrationsPath}`);
 
-				await generateSqliteMigrationsFromDir(migrationsPath, outputFile, migrationPattern);
+				await generateSqliteMigrationsFromDir(migrationsPath, outputFile, migrationPattern, framework);
 
 				console.log('Migration generation completed successfully');
 			} catch (error) {
@@ -237,7 +237,7 @@ async function main() {
 				console.log(`Generating Dexie schema in: ${outputFile}`);
 				console.log(`Processing migrations directory: ${migrationsPath}`);
 
-				await generateDexieMigrationFromDir(migrationsPath, outputFile, migrationPattern);
+				await generateDexieMigrationFromDir(migrationsPath, outputFile, migrationPattern, framework);
 
 				console.log('Dexie schema generation completed successfully');
 			} catch (error) {
