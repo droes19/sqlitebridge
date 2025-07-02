@@ -4,12 +4,14 @@
  * This module generates TypeScript model interfaces from SQLite migration files.
  * It parses SQL CREATE TABLE statements and generates corresponding TypeScript interfaces
  * with proper typing, documentation, and relationships between models.
+ * Supports both Angular and React frameworks with framework-specific optimizations.
  * 
  * @packageDocumentation
  */
 
 import { basename, join } from "node:path";
 import { ColumnDefinition, EnumDefinition, SchemaInfo, TableDefinition } from "../types";
+import { FrameworkType } from "../config";
 import * as utils from "../utils";
 
 /**
@@ -22,17 +24,19 @@ import * as utils from "../utils";
  * @param directoryPath - Path to the directory containing migration files
  * @param outputDir - Path to the output directory for generated files
  * @param pattern - Regular expression pattern to match migration files (default: /^V\d+__.+\.sql$/)
+ * @param framework - Target framework ('angular' | 'react')
  * 
  * @example
  * ```typescript
- * // Generate models from migrations in the 'migrations' directory
- * processModelDirectory('./migrations', './src/app/models');
+ * // Generate models from migrations in the 'migrations' directory for React
+ * processModelDirectory('./migrations', './src/models', /^V\d+__.+\.sql$/, 'react');
  * ```
  */
 export async function processModelDirectory(
 	directoryPath: string,
 	outputDir: string,
-	pattern: RegExp = /^V\d+__.+\.sql$/
+	pattern: RegExp = /^V\d+__.+\.sql$/,
+	framework: FrameworkType
 ): Promise<void> {
 	try {
 		// Validate input and create output directory
@@ -41,6 +45,7 @@ export async function processModelDirectory(
 		}
 
 		console.log(`Processing migration files in ${directoryPath}...`);
+		console.log(`Target framework: ${framework}`);
 
 		// Get all SQL files in the directory
 		const files = await utils.getSqlFilesInDirectory(directoryPath, pattern);
@@ -56,9 +61,9 @@ export async function processModelDirectory(
 		const schemaInfo = await extractSchemaFromMigrations(files, directoryPath);
 
 		// Generate model files
-		generateModelFiles(schemaInfo, outputDir);
+		await generateModelFiles(schemaInfo, outputDir, framework);
 
-		console.log(`\nSuccessfully generated TypeScript models.`);
+		console.log(`\nSuccessfully generated TypeScript models for ${framework}.`);
 		console.log(`Generated ${Object.keys(schemaInfo.tables).length} table models.`);
 		console.log(`Generated ${schemaInfo.enums.length} enum models.`);
 	} catch (error) {
@@ -140,10 +145,15 @@ async function extractSchemaFromMigrations(files: string[], directoryPath: strin
  * 
  * @param schemaInfo - Schema information with tables and enums
  * @param outputDir - Path to the output directory for generated files
+ * @param framework - Target framework ('angular' | 'react')
  * 
  * @internal
  */
-function generateModelFiles(schemaInfo: SchemaInfo, outputDir: string): void {
+async function generateModelFiles(
+	schemaInfo: SchemaInfo,
+	outputDir: string,
+	framework: FrameworkType
+): Promise<void> {
 	// Check if any tables have common fields that would benefit from BaseModel
 	const tablesWithCommonFields = Object.values(schemaInfo.tables).filter(table =>
 		shouldExtendBaseModel(table)
@@ -153,33 +163,36 @@ function generateModelFiles(schemaInfo: SchemaInfo, outputDir: string): void {
 
 	// Generate base model if needed
 	if (shouldCreateBaseModel) {
-		generateBaseModelFile(outputDir);
+		await generateBaseModelFile(outputDir, framework);
 	}
 
 	// Generate a file for each table
-	Object.values(schemaInfo.tables).forEach(table => {
-		generateTableModelFile(table, schemaInfo, outputDir, shouldCreateBaseModel);
-	});
+	const tablePromises = Object.values(schemaInfo.tables).map(table =>
+		generateTableModelFile(table, schemaInfo, outputDir, shouldCreateBaseModel, framework)
+	);
+	await Promise.all(tablePromises);
 
 	// Generate a file for each enum
-	schemaInfo.enums.forEach(enumTable => {
-		generateEnumFile(enumTable, outputDir);
-	});
+	const enumPromises = schemaInfo.enums.map(enumTable =>
+		generateEnumFile(enumTable, outputDir, framework)
+	);
+	await Promise.all(enumPromises);
 
 	// Generate an index file
-	generateIndexFile(schemaInfo, shouldCreateBaseModel, outputDir);
+	await generateIndexFile(schemaInfo, shouldCreateBaseModel, outputDir, framework);
 }
 
 /**
  * Generates the base model file with common fields.
  * 
  * @param outputDir - Path to the output directory
+ * @param framework - Target framework
  * 
  * @internal
  */
-async function generateBaseModelFile(outputDir: string): Promise<void> {
+async function generateBaseModelFile(outputDir: string, framework: FrameworkType): Promise<void> {
 	const baseModelPath = join(outputDir, 'base.model.ts');
-	const baseModelContent = generateBaseModelContent();
+	const baseModelContent = generateBaseModelContent(framework);
 
 	if (await utils.writeToFile(baseModelPath, baseModelContent)) {
 		console.log(`Generated base model -> ${baseModelPath}`);
@@ -193,6 +206,7 @@ async function generateBaseModelFile(outputDir: string): Promise<void> {
  * @param schemaInfo - Schema information with all tables and enums
  * @param outputDir - Path to the output directory
  * @param shouldExtendBaseModel - Whether the model should extend BaseModel
+ * @param framework - Target framework
  * 
  * @internal
  */
@@ -200,7 +214,8 @@ async function generateTableModelFile(
 	table: TableDefinition,
 	schemaInfo: SchemaInfo,
 	outputDir: string,
-	shouldExtendBaseModelBool: boolean
+	shouldExtendBaseModelBool: boolean,
+	framework: FrameworkType
 ): Promise<void> {
 	const interfaceName = utils.tableNameToInterfaceName(table.name);
 	const fileName = utils.interfaceNameToFileName(interfaceName);
@@ -209,7 +224,7 @@ async function generateTableModelFile(
 	// Check if this table should extend BaseModel
 	const extendsBase = shouldExtendBaseModelBool && shouldExtendBaseModel(table);
 
-	const fileContent = generateTypeScriptModelForTable(table, schemaInfo, extendsBase);
+	const fileContent = generateTypeScriptModelForTable(table, schemaInfo, extendsBase, framework);
 	if (await utils.writeToFile(filePath, fileContent)) {
 		if (extendsBase) {
 			console.log(`Generated model for ${table.name} (extends BaseModel) -> ${filePath}`);
@@ -224,16 +239,21 @@ async function generateTableModelFile(
  * 
  * @param enumTable - Enum table definition
  * @param outputDir - Path to the output directory
+ * @param framework - Target framework
  * 
  * @internal
  */
-async function generateEnumFile(enumTable: EnumDefinition, outputDir: string): Promise<void> {
+async function generateEnumFile(
+	enumTable: EnumDefinition,
+	outputDir: string,
+	framework: FrameworkType
+): Promise<void> {
 	const enumName = enumTable.name.replace(/s$/, ''); // Remove trailing 's' if present
 	const pascalCaseName = enumName.charAt(0).toUpperCase() + enumName.slice(1);
 	const fileName = utils.interfaceNameToFileName(pascalCaseName);
 	const filePath = join(outputDir, `${fileName}.ts`);
 
-	const fileContent = generateEnumFileContent(enumTable);
+	const fileContent = generateEnumFileContent(enumTable, framework);
 	if (await utils.writeToFile(filePath, fileContent)) {
 		console.log(`Generated enum for ${enumTable.name} -> ${filePath}`);
 	}
@@ -245,16 +265,18 @@ async function generateEnumFile(enumTable: EnumDefinition, outputDir: string): P
  * @param schemaInfo - Schema information with tables and enums
  * @param hasBaseModel - Whether a base model was generated
  * @param outputDir - Path to the output directory
+ * @param framework - Target framework
  * 
  * @internal
  */
 async function generateIndexFile(
 	schemaInfo: SchemaInfo,
 	hasBaseModel: boolean,
-	outputDir: string
+	outputDir: string,
+	framework: FrameworkType
 ): Promise<void> {
 	const indexFilePath = join(outputDir, 'index.ts');
-	const indexFileContent = generateIndexFileContent(schemaInfo, hasBaseModel);
+	const indexFileContent = generateIndexFileContent(schemaInfo, hasBaseModel, framework);
 	if (await utils.writeToFile(indexFilePath, indexFileContent)) {
 		console.log(`Generated index file -> ${indexFilePath}`);
 	}
@@ -265,13 +287,28 @@ async function generateIndexFile(
  * 
  * @param schema - Schema information containing tables and enums
  * @param hasBaseModel - Whether base.model.ts was generated
+ * @param framework - Target framework
  * @returns Generated index file content as a string
  * 
  * @internal
  */
-function generateIndexFileContent(schema: SchemaInfo, hasBaseModel: boolean = false): string {
-	let output = '// Auto-generated index file for SQLite migration models\n';
-	output += `// Generated on ${new Date().toISOString()}\n\n`;
+function generateIndexFileContent(
+	schema: SchemaInfo,
+	hasBaseModel: boolean = false,
+	framework: FrameworkType
+): string {
+	let output = `// Auto-generated index file for SQLite migration models\n`;
+	output += `// Generated on ${new Date().toISOString()}\n`;
+	output += `// Target framework: ${framework}\n\n`;
+
+	// Add framework-specific comments
+	if (framework === 'react') {
+		output += `// React TypeScript models for database entities\n`;
+		output += `// Compatible with React hooks and state management\n\n`;
+	} else {
+		output += `// Angular TypeScript models for database entities\n`;
+		output += `// Compatible with Angular services and dependency injection\n\n`;
+	}
 
 	// Add base model export if it exists
 	if (hasBaseModel) {
@@ -282,7 +319,14 @@ function generateIndexFileContent(schema: SchemaInfo, hasBaseModel: boolean = fa
 	Object.values(schema.tables).forEach(table => {
 		const interfaceName = utils.tableNameToInterfaceName(table.name);
 		const fileName = utils.interfaceNameToFileName(interfaceName);
-		output += `export { ${interfaceName}, ${interfaceName}Table } from './${fileName}';\n`;
+
+		if (framework === 'react') {
+			// For React, also export type aliases that are commonly used
+			output += `export type { ${interfaceName}, ${interfaceName}Table } from './${fileName}';\n`;
+		} else {
+			// For Angular, use regular exports
+			output += `export { ${interfaceName}, ${interfaceName}Table } from './${fileName}';\n`;
+		}
 	});
 
 	// Add exports for all enums
@@ -290,8 +334,29 @@ function generateIndexFileContent(schema: SchemaInfo, hasBaseModel: boolean = fa
 		const enumName = enumTable.name.replace(/s$/, ''); // Remove trailing 's' if present
 		const pascalCaseName = enumName.charAt(0).toUpperCase() + enumName.slice(1);
 		const fileName = utils.interfaceNameToFileName(pascalCaseName);
-		output += `export { ${pascalCaseName} } from './${fileName}';\n`;
+
+		if (framework === 'react') {
+			output += `export { ${pascalCaseName} } from './${fileName}';\n`;
+		} else {
+			output += `export { ${pascalCaseName} } from './${fileName}';\n`;
+		}
 	});
+
+	// Add framework-specific utility exports
+	if (framework === 'react') {
+		output += `\n// React-specific type utilities\n`;
+		output += `export type EntityState<T> = {\n`;
+		output += `  data: T[];\n`;
+		output += `  loading: boolean;\n`;
+		output += `  error: string | null;\n`;
+		output += `};\n\n`;
+
+		output += `export type EntityItem<T> = {\n`;
+		output += `  item: T | null;\n`;
+		output += `  loading: boolean;\n`;
+		output += `  error: string | null;\n`;
+		output += `};\n`;
+	}
 
 	return output;
 }
@@ -324,15 +389,22 @@ function shouldExtendBaseModel(table: TableDefinition): boolean {
  * This creates a TypeScript interface with common fields like id, createdAt, and updatedAt
  * that can be extended by other models for consistency.
  * 
+ * @param framework - Target framework
  * @returns Generated base model content as a string
  * 
  * @internal
  */
-function generateBaseModelContent(): string {
+function generateBaseModelContent(framework: FrameworkType): string {
 	let output = `// Auto-generated TypeScript base model with common fields\n`;
-	output += `// Generated on ${new Date().toISOString()}\n\n`;
+	output += `// Generated on ${new Date().toISOString()}\n`;
+	output += `// Target framework: ${framework}\n\n`;
 
-	output += `/**\n * Base interface with common fields for all models\n */\n`;
+	if (framework === 'react') {
+		output += `/**\n * Base interface with common fields for all models\n * Optimized for React applications with hooks and state management\n */\n`;
+	} else {
+		output += `/**\n * Base interface with common fields for all models\n * Compatible with Angular services and dependency injection\n */\n`;
+	}
+
 	output += `export interface BaseModel<IDType = number> {\n`;
 	output += `  /** Primary Key */\n`;
 	output += `  id: IDType;\n`;
@@ -342,7 +414,14 @@ function generateBaseModelContent(): string {
 	output += `  updatedAt: string;\n`;
 	output += `}\n\n`;
 
-	output += `/**\n * Base interface with snake_case fields for database tables\n */\n`;
+	output += `/**\n * Base interface with snake_case fields for database tables\n`;
+	if (framework === 'react') {
+		output += ` * Use this when working directly with database responses in React\n`;
+	} else {
+		output += ` * Use this when working directly with database responses in Angular services\n`;
+	}
+	output += ` */\n`;
+
 	output += `export interface BaseTable<IDType = number> {\n`;
 	output += `  /** Primary Key */\n`;
 	output += `  id: IDType;\n`;
@@ -352,6 +431,25 @@ function generateBaseModelContent(): string {
 	output += `  updated_at: string;\n`;
 	output += `}\n`;
 
+	// Add framework-specific utilities
+	if (framework === 'react') {
+		output += `\n/**\n * React hook-friendly base entity state\n */\n`;
+		output += `export interface BaseEntityState<T extends BaseModel> {\n`;
+		output += `  entities: T[];\n`;
+		output += `  selectedEntity: T | null;\n`;
+		output += `  loading: boolean;\n`;
+		output += `  error: string | null;\n`;
+		output += `  lastUpdated: string | null;\n`;
+		output += `}\n\n`;
+
+		output += `/**\n * React mutation state for create/update/delete operations\n */\n`;
+		output += `export interface MutationState {\n`;
+		output += `  loading: boolean;\n`;
+		output += `  error: string | null;\n`;
+		output += `  success: boolean;\n`;
+		output += `}\n`;
+	}
+
 	return output;
 }
 
@@ -359,24 +457,44 @@ function generateBaseModelContent(): string {
  * Generate TypeScript enum file content.
  * 
  * @param enumTable - Enum table definition
+ * @param framework - Target framework
  * @returns Generated enum file content as a string
  * 
  * @internal
  */
-function generateEnumFileContent(enumTable: EnumDefinition): string {
+function generateEnumFileContent(enumTable: EnumDefinition, framework: FrameworkType): string {
 	const enumName = enumTable.name.replace(/s$/, ''); // Remove trailing 's' if present
 	const pascalCaseName = enumName.charAt(0).toUpperCase() + enumName.slice(1);
 
 	let output = `// Auto-generated TypeScript enum for ${enumTable.name} table\n`;
-	output += `// Generated on ${new Date().toISOString()}\n\n`;
+	output += `// Generated on ${new Date().toISOString()}\n`;
+	output += `// Target framework: ${framework}\n\n`;
 
-	output += `/**\n * Enum for the ${enumTable.name} table\n */\n`;
+	if (framework === 'react') {
+		output += `/**\n * Enum for the ${enumTable.name} table\n * React-compatible enum with type safety\n */\n`;
+	} else {
+		output += `/**\n * Enum for the ${enumTable.name} table\n * Angular-compatible enum for services and components\n */\n`;
+	}
+
 	output += `export enum ${pascalCaseName} {\n`;
 	output += `  // Note: You'll need to fill in enum values based on your actual data\n`;
 	output += `  // Example:\n`;
 	output += `  // VALUE_ONE = 'value_one',\n`;
 	output += `  // VALUE_TWO = 'value_two',\n`;
-	output += `}\n`;
+	output += `}\n\n`;
+
+	// Add framework-specific utilities
+	if (framework === 'react') {
+		output += `/**\n * Helper function to get all enum values as an array\n * Useful for React select components or mapping\n */\n`;
+		output += `export const get${pascalCaseName}Values = (): ${pascalCaseName}[] => {\n`;
+		output += `  return Object.values(${pascalCaseName});\n`;
+		output += `};\n\n`;
+
+		output += `/**\n * Helper function to check if a value is a valid enum value\n * Useful for React form validation\n */\n`;
+		output += `export const isValid${pascalCaseName} = (value: any): value is ${pascalCaseName} => {\n`;
+		output += `  return Object.values(${pascalCaseName}).includes(value);\n`;
+		output += `};\n`;
+	}
 
 	return output;
 }
@@ -390,6 +508,7 @@ function generateEnumFileContent(enumTable: EnumDefinition): string {
  * @param table - Table definition object
  * @param schema - Schema information containing all tables
  * @param extendsBaseModel - Whether the model should extend BaseModel
+ * @param framework - Target framework
  * @returns Generated TypeScript interface content as a string
  * 
  * @internal
@@ -397,13 +516,15 @@ function generateEnumFileContent(enumTable: EnumDefinition): string {
 function generateTypeScriptModelForTable(
 	table: TableDefinition,
 	schema: SchemaInfo,
-	extendsBaseModel: boolean = false
+	extendsBaseModel: boolean = false,
+	framework: FrameworkType
 ): string {
 	let output = '';
 
 	// Header
 	output += `// Auto-generated TypeScript model for the ${table.name} table\n`;
 	output += `// Generated on ${new Date().toISOString()}\n`;
+	output += `// Target framework: ${framework}\n`;
 	if (table.originalFile) {
 		output += `// Originally defined in: ${table.originalFile}\n`;
 	}
@@ -417,7 +538,12 @@ function generateTypeScriptModelForTable(
 
 	// Interface documentation
 	const interfaceName = utils.tableNameToInterfaceName(table.name);
-	output += `/**\n * Interface for the ${table.name} table\n */\n`;
+
+	if (framework === 'react') {
+		output += `/**\n * React-compatible interface for the ${table.name} table\n * Optimized for React hooks, state management, and components\n */\n`;
+	} else {
+		output += `/**\n * Angular-compatible interface for the ${table.name} table\n * Compatible with Angular services and dependency injection\n */\n`;
+	}
 
 	// Check if this table has an ID column with a type different from number
 	const idColumn = table.columns.find(col => col.name === 'id' && col.isPrimaryKey);
@@ -440,10 +566,22 @@ function generateTypeScriptModelForTable(
 
 	// Table interface documentation (snake_case props for direct DB access)
 	if (extendsBaseModel) {
-		output += `/**\n * Table interface (snake_case) for the ${table.name} table\n */\n`;
+		output += `/**\n * Table interface (snake_case) for the ${table.name} table\n`;
+		if (framework === 'react') {
+			output += ` * Use this when working directly with database responses in React\n`;
+		} else {
+			output += ` * Use this when working directly with database responses in Angular services\n`;
+		}
+		output += ` */\n`;
 		output += `export interface ${interfaceName}Table extends BaseTable<${idType}> {\n`;
 	} else {
-		output += `/**\n * Table interface (snake_case) for the ${table.name} table\n */\n`;
+		output += `/**\n * Table interface (snake_case) for the ${table.name} table\n`;
+		if (framework === 'react') {
+			output += ` * Use this when working directly with database responses in React\n`;
+		} else {
+			output += ` * Use this when working directly with database responses in Angular services\n`;
+		}
+		output += ` */\n`;
 		output += `export interface ${interfaceName}Table {\n`;
 	}
 
@@ -451,6 +589,39 @@ function generateTypeScriptModelForTable(
 	output += generateTableProperties(table, extendsBaseModel);
 
 	output += `}\n`;
+
+	// Add framework-specific type utilities
+	if (framework === 'react') {
+		output += generateReactTypeUtilities(interfaceName);
+	}
+
+	return output;
+}
+
+/**
+ * Generate React-specific type utilities for a model.
+ * 
+ * @param interfaceName - Name of the interface
+ * @returns Generated React type utilities as a string
+ * 
+ * @internal
+ */
+function generateReactTypeUtilities(interfaceName: string): string {
+	let output = `\n// React-specific type utilities\n`;
+
+	output += `/**\n * Partial ${interfaceName} for create operations (React forms)\n */\n`;
+	output += `export type Create${interfaceName} = Omit<${interfaceName}, 'id' | 'createdAt' | 'updatedAt'>;\n\n`;
+
+	output += `/**\n * Partial ${interfaceName} for update operations (React forms)\n */\n`;
+	output += `export type Update${interfaceName} = Partial<Omit<${interfaceName}, 'id' | 'createdAt' | 'updatedAt'>>;\n\n`;
+
+	output += `/**\n * ${interfaceName} with optional fields for React state initialization\n */\n`;
+	output += `export type ${interfaceName}State = Partial<${interfaceName}>;\n\n`;
+
+	output += `/**\n * ${interfaceName} form data type for React forms\n */\n`;
+	output += `export type ${interfaceName}FormData = {\n`;
+	output += `  [K in keyof Create${interfaceName}]: Create${interfaceName}[K] | '';\n`;
+	output += `};\n`;
 
 	return output;
 }
@@ -613,14 +784,19 @@ function generateForeignKeyComments(table: TableDefinition): string {
  * 
  * @param sqlFilePath - Path to the SQL file
  * @param outputDir - Path to the output directory for generated files
+ * @param framework - Target framework ('angular' | 'react')
  * 
  * @example
  * ```typescript
- * // Generate models from a single migration file
- * processModelFile('./migrations/V1__initial_schema.sql', './src/app/models');
+ * // Generate models from a single migration file for React
+ * processModelFile('./migrations/V1__initial_schema.sql', './src/models', 'react');
  * ```
  */
-export async function processModelFile(sqlFilePath: string, outputDir: string): Promise<void> {
+export async function processModelFile(
+	sqlFilePath: string,
+	outputDir: string,
+	framework: FrameworkType
+): Promise<void> {
 	try {
 		// Validate file and create output directory
 		if (!validateFile(sqlFilePath, outputDir)) {
@@ -628,6 +804,7 @@ export async function processModelFile(sqlFilePath: string, outputDir: string): 
 		}
 
 		console.log(`Processing file: ${sqlFilePath}`);
+		console.log(`Target framework: ${framework}`);
 
 		const fileName = basename(sqlFilePath);
 
@@ -635,9 +812,9 @@ export async function processModelFile(sqlFilePath: string, outputDir: string): 
 		const schemaInfo = await extractSchemaFromFile(sqlFilePath, fileName);
 
 		// Generate model files
-		generateModelFiles(schemaInfo, outputDir);
+		await generateModelFiles(schemaInfo, outputDir, framework);
 
-		console.log(`\nSuccessfully generated TypeScript models.`);
+		console.log(`\nSuccessfully generated TypeScript models for ${framework}.`);
 		console.log(`Generated ${Object.keys(schemaInfo.tables).length} table models.`);
 		console.log(`Generated ${schemaInfo.enums.length} enum models.`);
 	} catch (error) {

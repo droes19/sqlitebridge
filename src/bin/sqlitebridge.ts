@@ -39,7 +39,7 @@ async function main() {
 	// Destructure configuration values
 	const { migrationsPath, generatedPath, queriesPath, withDexie, frameworkConfig, migrationPattern } = config;
 	const { models, migrations, services, dexie, hooks, providers } = generatedPath;
-	const { framework, servicePattern, generateHooks, generateProviders, useDependencyInjection } = frameworkConfig
+	const { framework, servicePattern, generateHooks, generateProviders } = frameworkConfig
 
 	/**
 	 * Create and configure the main program
@@ -85,11 +85,11 @@ async function main() {
 			try {
 				// Generate models first as they're needed by other generators
 				console.log('\nGenerating models...');
-				await processModelDirectory(migrationsPath, models, migrationPattern);
+				await processModelDirectory(migrationsPath, models, migrationPattern, framework);
 
 				// Generate SQLite migrations
 				console.log('\nGenerating SQLite migrations...');
-				await generateSqliteMigrationsFromDir(migrationsPath, migrations, migrationsPattern);
+				await generateSqliteMigrationsFromDir(migrationsPath, migrations, migrationPattern, framework);
 
 				// Generate services/hooks based on framework
 				console.log(`\nGenerating ${framework} ${servicePattern}...`);
