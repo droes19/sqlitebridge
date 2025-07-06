@@ -14,6 +14,7 @@ import { SchemaInfo, TableDefinition } from '../types';
 import { FrameworkType } from '../config';
 import { basename, join } from 'node:path';
 import * as service_utils from './service-utils';
+import { generateDatabaseService } from './database-service-generator';
 
 /**
  * Process a directory of query files and generate service files.
@@ -66,6 +67,11 @@ export async function processServiceDirectory(
 
 		console.log(`Processing query files in ${queriesDir}...`);
 		console.log(`Target framework: ${framework}`);
+
+		// Check and generate database service if needed
+		const databaseServicePath = join(outputDir, 'database.service.ts');
+		console.log(`Checking for database service at: ${databaseServicePath}`);
+		await generateDatabaseService(databaseServicePath, framework, withDexie);
 
 		// Get all SQL files in the queries directory
 		const queryFiles = await utils.getSqlFilesInDirectory(queriesDir);
@@ -508,6 +514,11 @@ export async function processServiceFile(
 
 		console.log(`Processing query file: ${queryFilePath}`);
 		console.log(`Target framework: ${framework}`);
+
+		// Check and generate database service if needed
+		const databaseServicePath = join(outputDir, 'database.service.ts');
+		console.log(`Checking for database service at: ${databaseServicePath}`);
+		await generateDatabaseService(databaseServicePath, framework, withDexie);
 
 		// Parse migration files to get table definitions
 		const schemaInfo = await parseSchemaFromMigrations(migrationsDir, pattern);

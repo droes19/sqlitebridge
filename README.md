@@ -9,9 +9,11 @@ SQLiteBridge is a TypeScript toolkit for cross-platform SQLite database manageme
 
 - **TypeScript Model Generation**: Create strongly-typed interfaces and classes from SQLite migration files
 - **Dexie.js Schema Generation**: Automatically generate Dexie.js compatible schemas for web platform support
-- **Service Class Generation**: Generate ready-to-use Angular services for database operations
+- **Service Class Generation**: Generate ready-to-use Angular services or React hooks for database operations
+- **Database Service Generation**: Automatically generate database service with platform detection and migration management
 - **Migration Management**: Simplify SQLite migration handling across platforms
 - **Cross-Platform Support**: Works with `@capacitor-community/sqlite` on mobile and Dexie.js on web
+- **Framework Support**: Supports both Angular and React frameworks
 
 ## Installation
 
@@ -41,8 +43,8 @@ npm install @capacitor-community/sqlite dexie
 SQLiteBridge provides a command-line interface for generating code from your SQL migrations:
 
 ```bash
-# Generate all artifacts (models, migrations, services, and optionally Dexie schema)
-npx sqlitebridge all [--dexie]
+# Generate all artifacts (models, migrations, services, database service, and optionally Dexie schema)
+npx sqlitebridge all [--dexie] [--framework <framework>]
 
 # Generate only TypeScript models
 npx sqlitebridge model [--file <filepath>] [--output-dir <output-dir>]
@@ -50,14 +52,20 @@ npx sqlitebridge model [--file <filepath>] [--output-dir <output-dir>]
 # Generate SQLite migrations
 npx sqlitebridge migration [--output-file <output-file>]
 
-# Generate service classes
-npx sqlitebridge service [--file <filepath>] [--output-dir <output-dir>]
+# Generate service classes/hooks
+npx sqlitebridge service [--file <filepath>] [--output-dir <output-dir>] [--framework <framework>]
+
+# Generate database service
+npx sqlitebridge database-service [--output-file <output-file>] [--framework <framework>] [--dexie]
 
 # Generate Dexie.js schema
 npx sqlitebridge dexie [--output-file <output-file>]
 
 # Display version information
 npx sqlitebridge version
+
+# Show configuration help
+npx sqlitebridge config
 ```
 
 ### Configuration
@@ -74,7 +82,39 @@ Create a `sqlitebridge.config.json` file in your project root to customize paths
     "dexie": "./src/app/core/database/dexie-schema.ts",
     "services": "./src/app/core/database/services"
   },
-  "withDexie": true
+  "withDexie": true,
+  "frameworkConfig": {
+    "framework": "angular",
+    "servicePattern": "class",
+    "generateHooks": false,
+    "generateProviders": false,
+    "useDependencyInjection": true
+  }
+}
+```
+
+For React projects, use:
+
+```json
+{
+  "migrationsPath": "./migrations",
+  "queriesPath": "./queries",
+  "generatedPath": {
+    "migrations": "./src/database/migrations.ts",
+    "models": "./src/database/models",
+    "dexie": "./src/database/dexie-schema.ts",
+    "services": "./src/database/services",
+    "hooks": "./src/database/hooks",
+    "providers": "./src/database/providers"
+  },
+  "withDexie": true,
+  "frameworkConfig": {
+    "framework": "react",
+    "servicePattern": "hooks",
+    "generateHooks": true,
+    "generateProviders": true,
+    "useDependencyInjection": false
+  }
 }
 ```
 
@@ -143,13 +183,15 @@ export interface UserTable extends BaseTable<number> {
 
 ### Services
 
-For each table, a corresponding Angular service is generated with:
+For each table, a corresponding service is generated based on the target framework:
+
+#### Angular Services
+- Injectable services with dependency injection
 - Basic CRUD operations
 - Custom queries from matching SQL files
 - Automatic mapping between snake_case (DB) and camelCase (model)
 - Dexie.js support (if enabled)
 
-Example:
 ```typescript
 @Injectable({ providedIn: 'root' })
 export class UserService {
@@ -165,6 +207,81 @@ export class UserService {
 
   async findByEmail(email: string): Promise<User | null> {
     // Implementation of custom query...
+  }
+}
+```
+
+#### React Hooks
+- Hook collections with state management
+- CRUD operations as hooks
+- Custom query hooks
+- Error handling and loading states
+
+```typescript
+export const useUser = (databaseService: DatabaseService) => {
+  const useCreate = () => {
+    // Hook implementation with state management
+  };
+
+  const useGetById = (id: number) => {
+    // Hook implementation with data fetching
+  };
+
+  const useFindByEmail = (email: string) => {
+    // Custom query hook implementation
+  };
+
+  return {
+    useCreate,
+    useGetById,
+    useFindByEmail,
+    // ... other hooks
+  };
+};
+```
+
+### Database Service
+
+A main database service is automatically generated that handles:
+- Platform detection (native iOS/Android vs web)
+- Database initialization and connection management
+- Migration execution and tracking
+- Cross-platform database operations
+- Development mode helpers
+
+#### Angular Database Service
+```typescript
+@Injectable({ providedIn: 'root' })
+export class DatabaseService {
+  constructor(private platform: Platform) {}
+
+  async initializeDatabase(): Promise<void> {
+    // Platform detection and initialization
+  }
+
+  async executeQuery(query: string, params: any[]): Promise<any> {
+    // Cross-platform query execution
+  }
+
+  isNativeDatabase(): boolean {
+    // Platform detection helper
+  }
+}
+```
+
+#### React Database Service
+```typescript
+class DatabaseService {
+  async initializeDatabase(): Promise<void> {
+    // Platform detection and initialization
+  }
+
+  async executeQuery(query: string, params: any[]): Promise<any> {
+    // Cross-platform query execution
+  }
+
+  isNativeDatabase(): boolean {
+    // Platform detection helper
   }
 }
 ```

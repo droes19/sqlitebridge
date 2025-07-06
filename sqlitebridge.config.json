@@ -1,3 +1,6 @@
 {
-  "withDexie": true
+  "withDexie": true,
+  "frameworkConfig" : {
+	  "framework": "react"
+  }
 }

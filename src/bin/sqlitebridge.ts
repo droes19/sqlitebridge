@@ -15,7 +15,8 @@ import {
 	processModelDirectory,
 	processServiceDirectory,
 	processServiceFile,
-	generateDexieMigrationFromDir
+	generateDexieMigrationFromDir,
+	generateDatabaseService
 } from "../generators/index.js";
 import * as utils from "../utils/index.js";
 
@@ -101,6 +102,11 @@ async function main() {
 					migrationPattern,
 					framework // Pass framework config
 				);
+
+				// Generate database service if needed
+				console.log('\nChecking for database service...');
+				const databaseServicePath = `${services}/database.service.ts`;
+				await generateDatabaseService(databaseServicePath, framework, optDexie);
 
 				// Generate React-specific files if needed
 				if (framework === 'react') {
@@ -242,6 +248,37 @@ async function main() {
 				console.log('Dexie schema generation completed successfully');
 			} catch (error) {
 				console.error('Error generating Dexie schema:', error);
+				process.exit(1);
+			}
+		});
+
+	/**
+	 * Command to generate database service file
+	 */
+	program.command('database-service')
+		.description('Generate database service file for platform detection and database management')
+		.option('--output-file <output-file>', 'Path for the generated database service file')
+		.option('--framework <framework>', 'Target framework (react|angular)', framework)
+		.option('--dexie', 'Enable Dexie.js support', withDexie)
+		.action(async (options) => {
+			try {
+				const outputFile = options.outputFile || `${services}/database.service.ts`;
+				const targetFramework = options.framework || framework;
+				const enableDexie = options.dexie !== undefined ? options.dexie : withDexie;
+
+				console.log(`Generating ${targetFramework} database service in: ${outputFile}`);
+				console.log(`Dexie support: ${enableDexie ? 'enabled' : 'disabled'}`);
+
+				const success = await generateDatabaseService(outputFile, targetFramework, enableDexie);
+
+				if (success) {
+					console.log('Database service generation completed successfully');
+				} else {
+					console.error('Database service generation failed');
+					process.exit(1);
+				}
+			} catch (error) {
+				console.error('Error generating database service:', error);
 				process.exit(1);
 			}
 		});

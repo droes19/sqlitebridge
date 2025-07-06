@@ -26,19 +26,19 @@ import { VersionInfo } from "../types";
  * ```
  */
 export const extractVersionInfo = (fileName: string): VersionInfo | null => {
-    // Pattern to match Vx__description.sql format
-    const versionMatch = fileName.match(/^V(\d+)__(.+)\.sql$/);
+	// Pattern to match Vx__description.sql format
+	const versionMatch = fileName.match(/^V(\d+)__(.+)\.sql$/);
 
-    if (versionMatch && versionMatch.length >= 3) {
-        const version = parseInt(versionMatch[1], 10);
+	if (versionMatch && versionMatch.length >= 3) {
+		const version = parseInt(versionMatch[1], 10);
 
-        // Convert the filename to a readable description
-        let description = formatDescription(versionMatch[2]);
+		// Convert the filename to a readable description
+		let description = formatDescription(versionMatch[2]);
 
-        return { version, description };
-    }
+		return { version, description };
+	}
 
-    return null;
+	return null;
 };
 
 /**
@@ -50,15 +50,15 @@ export const extractVersionInfo = (fileName: string): VersionInfo | null => {
  * @internal
  */
 function formatDescription(rawDescription: string): string {
-    return rawDescription
-        .replace(/-/g, ' ')          // Replace hyphens with spaces
-        .replace(/_/g, ' ')          // Replace underscores with spaces
-        .replace(/([a-z])([A-Z])/g, '$1 $2')  // Convert camelCase to spaces
-        .toLowerCase()
-        // Capitalize first letter of each word
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
+	return rawDescription
+		.replace(/-/g, ' ')          // Replace hyphens with spaces
+		.replace(/_/g, ' ')          // Replace underscores with spaces
+		.replace(/([a-z])([A-Z])/g, '$1 $2')  // Convert camelCase to spaces
+		.toLowerCase()
+		// Capitalize first letter of each word
+		.split(' ')
+		.map(word => word.charAt(0).toUpperCase() + word.slice(1))
+		.join(' ');
 }
 
 /**
@@ -74,8 +74,8 @@ function formatDescription(rawDescription: string): string {
  * ```
  */
 export const extractVersionFromFileName = (fileName: string): number | null => {
-    const versionInfo = extractVersionInfo(fileName);
-    return versionInfo ? versionInfo.version : null;
+	const versionInfo = extractVersionInfo(fileName);
+	return versionInfo ? versionInfo.version : null;
 };
 
 /**
@@ -94,7 +94,7 @@ export const extractVersionFromFileName = (fileName: string): number | null => {
  * ```
  */
 export const isValidMigrationFileName = (fileName: string): boolean => {
-    return fileName.match(/^V\d+__.+\.sql$/) !== null;
+	return fileName.match(/^V\d+__.+\.sql$/) !== null;
 };
 
 /**
@@ -110,12 +110,12 @@ export const isValidMigrationFileName = (fileName: string): boolean => {
  * ```
  */
 export const getNextVersionNumber = (existingVersions: number[]): number => {
-    if (existingVersions.length === 0) {
-        return 1;
-    }
-    
-    const maxVersion = Math.max(...existingVersions);
-    return maxVersion + 1;
+	if (existingVersions.length === 0) {
+		return 1;
+	}
+
+	const maxVersion = Math.max(...existingVersions);
+	return maxVersion + 1;
 };
 
 /**
@@ -132,12 +132,12 @@ export const getNextVersionNumber = (existingVersions: number[]): number => {
  * ```
  */
 export const formatMigrationFileName = (version: number, description: string): string => {
-    const formattedDescription = description
-        .toLowerCase()
-        .replace(/\s+/g, '_')    // Replace spaces with underscores
-        .replace(/[^a-z0-9_]/g, ''); // Remove special characters
-        
-    return `V${version}__${formattedDescription}.sql`;
+	const formattedDescription = description
+		.toLowerCase()
+		.replace(/\s+/g, '_')    // Replace spaces with underscores
+		.replace(/[^a-z0-9_]/g, ''); // Remove special characters
+
+	return `V${version}__${formattedDescription}.sql`;
 };
 
 /**
@@ -154,7 +154,7 @@ export const formatMigrationFileName = (version: number, description: string): s
  * ```
  */
 export const compareVersions = (a: number, b: number): number => {
-    return a - b;
+	return a - b;
 };
 
 /**
@@ -173,19 +173,19 @@ export const compareVersions = (a: number, b: number): number => {
  * ```
  */
 export const validateSequentialVersions = (versions: number[]): { valid: boolean; error?: string } => {
-    // Sort versions
-    const sortedVersions = [...versions].sort(compareVersions);
-    
-    // Check for sequential versions starting from 1
-    for (let i = 0; i < sortedVersions.length; i++) {
-        const expectedVersion = i + 1;
-        if (sortedVersions[i] !== expectedVersion) {
-            return {
-                valid: false,
-                error: `Missing version ${expectedVersion}`
-            };
-        }
-    }
-    
-    return { valid: true };
+	// Sort versions
+	const sortedVersions = [...versions].sort(compareVersions);
+
+	// Check for sequential versions starting from 1
+	for (let i = 0; i < sortedVersions.length; i++) {
+		const expectedVersion = i + 1;
+		if (sortedVersions[i] !== expectedVersion) {
+			return {
+				valid: false,
+				error: `Missing version ${expectedVersion}`
+			};
+		}
+	}
+
+	return { valid: true };
 };

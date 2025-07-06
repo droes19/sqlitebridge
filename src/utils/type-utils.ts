@@ -20,7 +20,7 @@
  * ```
  */
 export function snakeToCamelCase(str: string): string {
-    return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+	return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 }
 
 /**
@@ -36,7 +36,7 @@ export function snakeToCamelCase(str: string): string {
  * ```
  */
 export function camelToSnakeCase(str: string): string {
-    return str.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+	return str.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 }
 
 /**
@@ -55,11 +55,11 @@ export function camelToSnakeCase(str: string): string {
  * ```
  */
 export function toPascalCase(str: string): string {
-    // First convert to camelCase if it's snake_case
-    const camelCase = snakeToCamelCase(str);
+	// First convert to camelCase if it's snake_case
+	const camelCase = snakeToCamelCase(str);
 
-    // Then capitalize the first letter
-    return camelCase.charAt(0).toUpperCase() + camelCase.slice(1);
+	// Then capitalize the first letter
+	return camelCase.charAt(0).toUpperCase() + camelCase.slice(1);
 }
 
 /**
@@ -78,11 +78,11 @@ export function toPascalCase(str: string): string {
  * ```
  */
 export function toKebabCase(str: string): string {
-    // First convert to snake_case if it's camelCase
-    const snakeCase = camelToSnakeCase(str);
+	// First convert to snake_case if it's camelCase
+	const snakeCase = camelToSnakeCase(str);
 
-    // Then replace underscores with hyphens
-    return snakeCase.replace(/_/g, '-');
+	// Then replace underscores with hyphens
+	return snakeCase.replace(/_/g, '-');
 }
 
 /**
@@ -101,15 +101,15 @@ export function toKebabCase(str: string): string {
  * ```
  */
 export function toValidIdentifier(str: string): string {
-    // Replace invalid characters with underscores
-    let identifier = str.replace(/[^a-zA-Z0-9_$]/g, '_');
+	// Replace invalid characters with underscores
+	let identifier = str.replace(/[^a-zA-Z0-9_$]/g, '_');
 
-    // Ensure it doesn't start with a number
-    if (/^[0-9]/.test(identifier)) {
-        identifier = '_' + identifier;
-    }
+	// Ensure it doesn't start with a number
+	if (/^[0-9]/.test(identifier)) {
+		identifier = '_' + identifier;
+	}
 
-    return identifier;
+	return identifier;
 }
 
 /**
@@ -128,9 +128,9 @@ export function toValidIdentifier(str: string): string {
  * ```
  */
 export function isValidIdentifier(str: string): boolean {
-    // Valid identifier pattern: starts with letter, underscore, or dollar sign,
-    // followed by letters, numbers, underscores, or dollar signs
-    return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(str);
+	// Valid identifier pattern: starts with letter, underscore, or dollar sign,
+	// followed by letters, numbers, underscores, or dollar signs
+	return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(str);
 }
 
 /**
@@ -146,8 +146,8 @@ export function isValidIdentifier(str: string): boolean {
  * ```
  */
 export function toInterfaceName(str: string): string {
-    // Convert to PascalCase
-    return toPascalCase(str);
+	// Convert to PascalCase
+	return toPascalCase(str);
 }
 
 /**
@@ -166,39 +166,39 @@ export function toInterfaceName(str: string): string {
  * ```
  */
 export function toTypeScriptType(sqlType: string, isNullable: boolean = false): string {
-    let tsType: string;
+	let tsType: string;
 
-    // Convert SQL type to TypeScript type
-    const lowerType = sqlType.toLowerCase();
+	// Convert SQL type to TypeScript type
+	const lowerType = sqlType.toLowerCase();
 
-    if (lowerType.includes('int') ||
-        lowerType.includes('double') ||
-        lowerType.includes('float') ||
-        lowerType.includes('decimal') ||
-        lowerType.includes('numeric')) {
-        tsType = 'number';
-    } else if (lowerType.includes('char') ||
-        lowerType.includes('text') ||
-        lowerType.includes('clob') ||
-        lowerType.includes('varchar')) {
-        tsType = 'string';
-    } else if (lowerType.includes('bool')) {
-        tsType = 'boolean';
-    } else if (lowerType.includes('date') ||
-        lowerType.includes('time')) {
-        tsType = 'string'; // Using string for dates to match SQLite storage
-    } else if (lowerType.includes('blob')) {
-        tsType = 'Uint8Array';
-    } else {
-        tsType = 'any';
-    }
+	if (lowerType.includes('int') ||
+		lowerType.includes('double') ||
+		lowerType.includes('float') ||
+		lowerType.includes('decimal') ||
+		lowerType.includes('numeric')) {
+		tsType = 'number';
+	} else if (lowerType.includes('char') ||
+		lowerType.includes('text') ||
+		lowerType.includes('clob') ||
+		lowerType.includes('varchar')) {
+		tsType = 'string';
+	} else if (lowerType.includes('bool')) {
+		tsType = 'boolean';
+	} else if (lowerType.includes('date') ||
+		lowerType.includes('time')) {
+		tsType = 'string'; // Using string for dates to match SQLite storage
+	} else if (lowerType.includes('blob')) {
+		tsType = 'Uint8Array';
+	} else {
+		tsType = 'any';
+	}
 
-    // Add nullable modifier if needed
-    if (isNullable) {
-        tsType += ' | null';
-    }
+	// Add nullable modifier if needed
+	if (isNullable) {
+		tsType += ' | null';
+	}
 
-    return tsType;
+	return tsType;
 }
 
 /**
@@ -219,17 +219,17 @@ export function toTypeScriptType(sqlType: string, isNullable: boolean = false): 
  * ```
  */
 export function getColumnType(
-    sqlType: string,
-    isNullable: boolean = false,
-    defaultValue?: string
+	sqlType: string,
+	isNullable: boolean = false,
+	defaultValue?: string
 ): string {
-    // If a default value is provided and the column is not explicitly nullable,
-    // we can use the non-nullable type
-    if (defaultValue !== undefined && !isNullable) {
-        return toTypeScriptType(sqlType, false);
-    }
+	// If a default value is provided and the column is not explicitly nullable,
+	// we can use the non-nullable type
+	if (defaultValue !== undefined && !isNullable) {
+		return toTypeScriptType(sqlType, false);
+	}
 
-    return toTypeScriptType(sqlType, isNullable);
+	return toTypeScriptType(sqlType, isNullable);
 }
 
 /**
@@ -251,16 +251,16 @@ export function getColumnType(
  * ```
  */
 export function toSqlLiteral(value: any): string {
-    if (value === null || value === undefined) {
-        return 'NULL';
-    } else if (typeof value === 'string') {
-        // Escape single quotes
-        return `'${value.replace(/'/g, "''")}'`;
-    } else if (typeof value === 'boolean') {
-        return value ? '1' : '0';
-    } else if (value instanceof Date) {
-        return `'${value.toISOString()}'`;
-    } else {
-        return String(value);
-    }
+	if (value === null || value === undefined) {
+		return 'NULL';
+	} else if (typeof value === 'string') {
+		// Escape single quotes
+		return `'${value.replace(/'/g, "''")}'`;
+	} else if (typeof value === 'boolean') {
+		return value ? '1' : '0';
+	} else if (value instanceof Date) {
+		return `'${value.toISOString()}'`;
+	} else {
+		return String(value);
+	}
 }

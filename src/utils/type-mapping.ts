@@ -35,49 +35,49 @@
  * ```
  */
 export function sqliteToTypeScriptType(sqlType: string): string {
-    // Normalize the type for case-insensitive matching
-    const type = sqlType.toLowerCase().trim();
+	// Normalize the type for case-insensitive matching
+	const type = sqlType.toLowerCase().trim();
 
-    // Handle numeric types
-    if (
-        type.includes('int') || 
-        type.includes('numeric') || 
-        type.includes('real') ||
-        type.includes('decimal') || 
-        type.includes('double') || 
-        type.includes('float')
-    ) {
-        return 'number';
-    } 
-    // Handle string types
-    else if (
-        type.includes('char') || 
-        type.includes('text') || 
-        type.includes('clob') ||
-        type.includes('varchar')
-    ) {
-        return 'string';
-    } 
-    // Handle binary data
-    else if (type.includes('blob')) {
-        return 'Buffer';
-    } 
-    // Handle boolean types
-    else if (type.includes('boolean') || type.includes('bool')) {
-        return 'boolean';
-    } 
-    // Handle date/time types - use string as SQLite stores these as strings
-    else if (
-        type.includes('date') || 
-        type.includes('time') ||
-        type.includes('timestamp')
-    ) {
-        return 'string'; // Using string instead of Date for SQLite compatibility
-    } 
-    // Fall back to any for unknown types
-    else {
-        return 'any';
-    }
+	// Handle numeric types
+	if (
+		type.includes('int') ||
+		type.includes('numeric') ||
+		type.includes('real') ||
+		type.includes('decimal') ||
+		type.includes('double') ||
+		type.includes('float')
+	) {
+		return 'number';
+	}
+	// Handle string types
+	else if (
+		type.includes('char') ||
+		type.includes('text') ||
+		type.includes('clob') ||
+		type.includes('varchar')
+	) {
+		return 'string';
+	}
+	// Handle binary data
+	else if (type.includes('blob')) {
+		return 'Buffer';
+	}
+	// Handle boolean types
+	else if (type.includes('boolean') || type.includes('bool')) {
+		return 'boolean';
+	}
+	// Handle date/time types - use string as SQLite stores these as strings
+	else if (
+		type.includes('date') ||
+		type.includes('time') ||
+		type.includes('timestamp')
+	) {
+		return 'string'; // Using string instead of Date for SQLite compatibility
+	}
+	// Fall back to any for unknown types
+	else {
+		return 'any';
+	}
 }
 
 /**
@@ -99,31 +99,31 @@ export function sqliteToTypeScriptType(sqlType: string): string {
  * ```
  */
 export function typeScriptToSqliteType(tsType: string): string {
-    // Normalize the type for case-insensitive matching
-    const type = tsType.toLowerCase().trim();
-    
-    switch (type) {
-        case 'number':
-        case 'bigint':
-            return 'INTEGER';
-            
-        case 'string':
-            return 'TEXT';
-            
-        case 'boolean':
-            return 'INTEGER'; // SQLite doesn't have a native BOOLEAN type
-            
-        case 'buffer':
-        case 'arraybuffer':
-        case 'uint8array':
-            return 'BLOB';
-            
-        case 'date':
-            return 'TEXT'; // SQLite stores dates as TEXT in ISO format
-            
-        default:
-            return 'TEXT'; // Default to TEXT for unknown types
-    }
+	// Normalize the type for case-insensitive matching
+	const type = tsType.toLowerCase().trim();
+
+	switch (type) {
+		case 'number':
+		case 'bigint':
+			return 'INTEGER';
+
+		case 'string':
+			return 'TEXT';
+
+		case 'boolean':
+			return 'INTEGER'; // SQLite doesn't have a native BOOLEAN type
+
+		case 'buffer':
+		case 'arraybuffer':
+		case 'uint8array':
+			return 'BLOB';
+
+		case 'date':
+			return 'TEXT'; // SQLite stores dates as TEXT in ISO format
+
+		default:
+			return 'TEXT'; // Default to TEXT for unknown types
+	}
 }
 
 /**
@@ -136,16 +136,16 @@ export function typeScriptToSqliteType(tsType: string): string {
  * @internal
  */
 export function sqliteTypeToJsConstructor(sqlType: string): typeof Number | typeof String | typeof Boolean | any {
-    const tsType = sqliteToTypeScriptType(sqlType);
-    
-    switch (tsType) {
-        case 'number':
-            return Number;
-        case 'string':
-            return String;
-        case 'boolean':
-            return Boolean;
-        default:
-            return null; // No specific conversion needed
-    }
+	const tsType = sqliteToTypeScriptType(sqlType);
+
+	switch (tsType) {
+		case 'number':
+			return Number;
+		case 'string':
+			return String;
+		case 'boolean':
+			return Boolean;
+		default:
+			return null; // No specific conversion needed
+	}
 }
