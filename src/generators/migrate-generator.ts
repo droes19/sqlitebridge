@@ -13,7 +13,11 @@
 import { basename, join } from 'node:path';
 import { Migration } from '../types';
 import { FrameworkType } from '../config';
+import { createLogger } from '../logger.js';
 import * as utils from '../utils';
+
+// Create dedicated logger for migration generation
+const logger = createLogger('MigrateGenerator');
 
 /**
  * Generate SQLite migrations array from a directory of migration files.
@@ -41,40 +45,45 @@ export async function generateSqliteMigrationsFromDir(
 	try {
 		// Validate directory exists
 		if (!(await utils.checkDirExists(directoryPath))) {
-			console.error(`Error: ${directoryPath} is not a valid directory.`);
-			return;
+			logger.error(`${directoryPath} is not a valid directory.`);
+			throw new Error(`Directory not found: ${directoryPath}`);
 		}
 
-		console.log(`Processing migration files in ${directoryPath}...`);
-		console.log(`Target framework: ${framework}`);
+		logger.info(`Processing migration files in ${directoryPath}...`);
+		logger.info(`Target framework: ${framework}`);
 
 		// Get all SQL files in the directory that match the pattern
 		const files = await utils.getSqlFilesInDirectory(directoryPath, pattern);
 
 		if (files.length === 0) {
-			console.error(`No migration files matching the pattern ${pattern} found in ${directoryPath}.`);
-			return;
+			logger.error(`No migration files matching the pattern ${pattern} found in ${directoryPath}.`);
+			throw new Error(`No migration files found matching pattern ${pattern}`);
 		}
 
-		console.log(`Found ${files.length} migration files.`);
+		logger.info(`Found ${files.length} migration files.`);
 
 		// Process each file to extract migrations
 		const migrations = await extractMigrationsFromFiles(files, directoryPath);
 
 		// Sort migrations by version
 		migrations.sort((a, b) => a.version - b.version);
+		logger.debug(`Sorted ${migrations.length} migrations by version`);
 
 		// Generate output content
 		const output = generateMigrationsArrayContent(migrations, framework);
 
 		// Write output file
 		if (await utils.writeToFile(outputPath, output)) {
-			console.log(`\nSuccessfully generated SQLite migrations array for ${framework}.`);
-			console.log(`Generated ${migrations.length} migration versions.`);
-			console.log(`Output written to: ${outputPath}`);
+			logger.info(`Successfully generated SQLite migrations array for ${framework}.`);
+			logger.info(`Generated ${migrations.length} migration versions.`);
+			logger.info(`Output written to: ${outputPath}`);
+		} else {
+			logger.error(`Failed to write migrations file to ${outputPath}`);
+			throw new Error(`Failed to write migrations file to ${outputPath}`);
 		}
 	} catch (error) {
-		console.error('Error generating SQLite migrations array:', error);
+		logger.error('Error generating SQLite migrations array:', error);
+		throw error;
 	}
 }
 
@@ -90,33 +99,45 @@ export async function generateSqliteMigrationsFromDir(
 async function extractMigrationsFromFiles(files: string[], directoryPath: string): Promise<Migration[]> {
 	const migrations: Migration[] = [];
 
+	logger.debug(`Extracting migrations from ${files.length} files`);
+
 	for (const file of files) {
 		const filePath = join(directoryPath, file);
 		const versionInfo = utils.extractVersionInfo(file);
 
 		if (!versionInfo) {
-			console.warn(`Warning: Could not extract version information from ${file}, skipping.`);
+			logger.warn(`Could not extract version information from ${file}, skipping.`);
 			continue;
 		}
 
-		console.log(`Processing: ${file} (version ${versionInfo.version} - ${versionInfo.description})`);
+		logger.debug(`Processing: ${file} (version ${versionInfo.version} - ${versionInfo.description})`);
 
 		const content = await utils.readFile(filePath);
-		if (!content) continue;
+		if (!content) {
+			logger.warn(`Could not read content from ${file}, skipping.`);
+			continue;
+		}
 
 		const queries = utils.extractQueriesFromContent(content);
 
 		if (queries.length === 0) {
-			console.warn(`Warning: No valid SQL queries found in ${file}, skipping.`);
+			logger.warn(`No valid SQL queries found in ${file}, skipping.`);
 			continue;
 		}
+
+		logger.trace(`Extracted ${queries.length} queries from ${file}`);
 
 		migrations.push({
 			version: versionInfo.version,
 			description: versionInfo.description,
 			queries: queries
 		});
+
+		logger.debug(`Added migration version ${versionInfo.version} with ${queries.length} queries`);
 	}
+
+	const totalQueries = migrations.reduce((sum, migration) => sum + migration.queries.length, 0);
+	logger.info(`Extracted ${migrations.length} migrations with ${totalQueries} total queries`);
 
 	return migrations;
 }
@@ -131,6 +152,8 @@ async function extractMigrationsFromFiles(files: string[], directoryPath: string
  * @internal
  */
 function generateMigrationsArrayContent(migrations: Migration[], framework: FrameworkType): string {
+	logger.debug(`Generating migrations array content for ${framework}`);
+
 	let output = `// Auto-generated SQLite migrations array from SQL files\n`;
 	output += `// Generated on ${new Date().toISOString()}\n`;
 	output += `// Target framework: ${framework}\n\n`;
@@ -158,6 +181,9 @@ function generateMigrationsArrayContent(migrations: Migration[], framework: Fram
 		output += generateAngularUtilities();
 	}
 
+	const contentLength = output.length;
+	logger.debug(`Generated ${contentLength} characters of migration content`);
+
 	return output;
 }
 
@@ -171,6 +197,7 @@ function generateMigrationsArrayContent(migrations: Migration[], framework: Fram
 function generateReactImports(): string {
 	let output = `import { capSQLiteVersionUpgrade } from "@capacitor-community/sqlite";\n`;
 	output += `import { useCallback, useEffect, useState } from "react";\n\n`;
+	logger.trace('Generated React imports');
 	return output;
 }
 
@@ -182,6 +209,7 @@ function generateReactImports(): string {
  * @internal
  */
 function generateAngularImports(): string {
+	logger.trace('Generated Angular imports');
 	return `import { capSQLiteVersionUpgrade } from "@capacitor-community/sqlite";\n\n`;
 }
 
@@ -212,6 +240,7 @@ function generateMigrationInterface(framework: FrameworkType): string {
 	output += `  queries: string[];\n`;
 	output += `}\n\n`;
 
+	logger.trace(`Generated Migration interface for ${framework}`);
 	return output;
 }
 
@@ -236,6 +265,8 @@ function generateMigrationsArray(migrations: Migration[], framework: FrameworkTy
 	output += ` */\n`;
 	output += `export const ALL_MIGRATIONS: Migration[] = [\n`;
 
+	let totalQueries = 0;
+
 	// Add each migration
 	migrations.forEach((migration, index) => {
 		const isLast = index === migrations.length - 1;
@@ -255,10 +286,13 @@ function generateMigrationsArray(migrations: Migration[], framework: FrameworkTy
 
 		output += `    ]\n`;
 		output += `  }${isLast ? '' : ','}\n`;
+
+		totalQueries += migration.queries.length;
 	});
 
 	output += `];\n\n`;
 
+	logger.debug(`Generated migrations array with ${migrations.length} migrations and ${totalQueries} total queries`);
 	return output;
 }
 
@@ -332,6 +366,7 @@ function generateMigrationHelpers(framework: FrameworkType): string {
 	output += `  return ALL_MIGRATIONS.map(m => m.version).sort((a, b) => a - b);\n`;
 	output += `}\n\n`;
 
+	logger.debug(`Generated migration helper functions for ${framework}`);
 	return output;
 }
 
@@ -413,6 +448,7 @@ function generateReactUtilities(): string {
 	output += `  return { valid: errors.length === 0, errors };\n`;
 	output += `}\n\n`;
 
+	logger.debug('Generated React-specific migration utilities');
 	return output;
 }
 
@@ -501,6 +537,7 @@ function generateAngularUtilities(): string {
 	output += `  };\n`;
 	output += `}\n\n`;
 
+	logger.debug('Generated Angular-specific migration utilities');
 	return output;
 }
 
@@ -529,12 +566,12 @@ export async function generateSqliteMigrationsFromFile(
 		// Check if file exists and read content
 		const content = await utils.readFile(sqlFilePath);
 		if (!content) {
-			console.error(`Error: Could not read file ${sqlFilePath}.`);
-			return;
+			logger.error(`Could not read file ${sqlFilePath}.`);
+			throw new Error(`File not found or unreadable: ${sqlFilePath}`);
 		}
 
-		console.log(`Processing file: ${sqlFilePath}`);
-		console.log(`Target framework: ${framework}`);
+		logger.info(`Processing file: ${sqlFilePath}`);
+		logger.info(`Target framework: ${framework}`);
 
 		const fileName = basename(sqlFilePath);
 		const versionInfo = utils.extractVersionInfo(fileName);
@@ -543,13 +580,17 @@ export async function generateSqliteMigrationsFromFile(
 		const version = versionInfo ? versionInfo.version : 1;
 		const description = versionInfo ? versionInfo.description : 'Initial Schema';
 
+		logger.debug(`Extracted version ${version}: ${description}`);
+
 		// Extract SQL queries from the file
 		const queries = utils.extractQueriesFromContent(content);
 
 		if (queries.length === 0) {
-			console.error(`Error: No valid SQL queries found in ${sqlFilePath}.`);
-			return;
+			logger.error(`No valid SQL queries found in ${sqlFilePath}.`);
+			throw new Error(`No valid SQL queries found in ${sqlFilePath}`);
 		}
+
+		logger.info(`Extracted ${queries.length} queries from ${fileName}`);
 
 		// Create a single migration
 		const migrations: Migration[] = [
@@ -565,11 +606,15 @@ export async function generateSqliteMigrationsFromFile(
 
 		// Write output file
 		if (await utils.writeToFile(outputPath, output)) {
-			console.log(`\nSuccessfully generated SQLite migrations array for ${framework}.`);
-			console.log(`Generated 1 migration version with ${queries.length} queries.`);
-			console.log(`Output written to: ${outputPath}`);
+			logger.info(`Successfully generated SQLite migrations array for ${framework}.`);
+			logger.info(`Generated 1 migration version with ${queries.length} queries.`);
+			logger.info(`Output written to: ${outputPath}`);
+		} else {
+			logger.error(`Failed to write migrations file to ${outputPath}`);
+			throw new Error(`Failed to write migrations file to ${outputPath}`);
 		}
 	} catch (error) {
-		console.error('Error generating SQLite migrations array:', error);
+		logger.error('Error generating SQLite migrations array:', error);
+		throw error;
 	}
 }

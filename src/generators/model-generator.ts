@@ -12,7 +12,11 @@
 import { basename, join } from "node:path";
 import { ColumnDefinition, EnumDefinition, SchemaInfo, TableDefinition } from "../types";
 import { FrameworkType } from "../config";
+import { createLogger } from "../logger";
 import * as utils from "../utils";
+
+// Create dedicated logger for model generation
+const logger = createLogger('ModelGenerator');
 
 /**
  * Process a directory of migration files and generate separate model files.
@@ -44,18 +48,18 @@ export async function processModelDirectory(
 			return;
 		}
 
-		console.log(`Processing migration files in ${directoryPath}...`);
-		console.log(`Target framework: ${framework}`);
+		logger.info(`Processing migration files in ${directoryPath}...`);
+		logger.info(`Target framework: ${framework}`);
 
 		// Get all SQL files in the directory
 		const files = await utils.getSqlFilesInDirectory(directoryPath, pattern);
 
 		if (files.length === 0) {
-			console.error(`No migration files matching the pattern ${pattern} found in ${directoryPath}.`);
-			return;
+			logger.error(`No migration files matching the pattern ${pattern} found in ${directoryPath}.`);
+			throw new Error(`No migration files found matching pattern ${pattern}`);
 		}
 
-		console.log(`Found ${files.length} migration files.`);
+		logger.info(`Found ${files.length} migration files.`);
 
 		// Extract schema information from the migration files
 		const schemaInfo = await extractSchemaFromMigrations(files, directoryPath);
@@ -63,11 +67,12 @@ export async function processModelDirectory(
 		// Generate model files
 		await generateModelFiles(schemaInfo, outputDir, framework);
 
-		console.log(`\nSuccessfully generated TypeScript models for ${framework}.`);
-		console.log(`Generated ${Object.keys(schemaInfo.tables).length} table models.`);
-		console.log(`Generated ${schemaInfo.enums.length} enum models.`);
+		logger.info(`Successfully generated TypeScript models for ${framework}.`);
+		logger.info(`Generated ${Object.keys(schemaInfo.tables).length} table models.`);
+		logger.info(`Generated ${schemaInfo.enums.length} enum models.`);
 	} catch (error) {
-		console.error('Error processing migration directory:', error);
+		logger.error('Error processing migration directory:', error);
+		throw error;
 	}
 }
 
@@ -83,16 +88,17 @@ export async function processModelDirectory(
 function validateDirectories(inputDir: string, outputDir: string): boolean {
 	// Check if input directory exists
 	if (!utils.checkDirExists(inputDir)) {
-		console.error(`Error: ${inputDir} is not a valid directory.`);
+		logger.error(`${inputDir} is not a valid directory.`);
 		return false;
 	}
 
 	// Create the output directory if it doesn't exist
 	if (!utils.ensureDir(outputDir)) {
-		console.error(`Error: Could not create output directory ${outputDir}.`);
+		logger.error(`Could not create output directory ${outputDir}.`);
 		return false;
 	}
 
+	logger.debug(`Validated directories - input: ${inputDir}, output: ${outputDir}`);
 	return true;
 }
 
@@ -112,30 +118,47 @@ async function extractSchemaFromMigrations(files: string[], directoryPath: strin
 		enums: []
 	};
 
+	logger.debug(`Extracting schema from ${files.length} migration files`);
+
 	// Process each file in order
 	for (const file of files) {
 		const filePath = join(directoryPath, file);
-		console.log(`Processing: ${file}`);
+		logger.debug(`Processing: ${file}`);
 
 		const sqlContent = await utils.readFile(filePath);
-		if (!sqlContent) continue;
+		if (!sqlContent) {
+			logger.warn(`Could not read content from ${file}, skipping`);
+			continue;
+		}
 
 		// First, parse CREATE TABLE statements
 		const { tables, enums } = utils.parseCreateTableStatements(sqlContent, file);
+		logger.trace(`Found ${tables.length} tables and ${enums.length} enums in ${file}`);
 
 		// Add tables to schema
 		tables.forEach(table => {
 			// If table already exists, this means it's being recreated or modified
 			// For simplicity, we'll just replace it
 			schemaInfo.tables[table.name] = table;
+			logger.trace(`Added/updated table: ${table.name}`);
 		});
 
 		// Add enums
 		schemaInfo.enums.push(...enums);
+		if (enums.length > 0) {
+			logger.trace(`Added ${enums.length} enums: ${enums.map(e => e.name).join(', ')}`);
+		}
 
 		// Then, parse ALTER TABLE statements to update existing tables
-		utils.parseAlterTableStatements(sqlContent, schemaInfo, file);
+		const alterations = utils.parseAlterTableStatements(sqlContent, schemaInfo, file);
+		if (alterations.length > 0) {
+			logger.debug(`Applied ${alterations.length} table alterations from ${file}`);
+		}
 	}
+
+	const totalTables = Object.keys(schemaInfo.tables).length;
+	const totalEnums = schemaInfo.enums.length;
+	logger.info(`Schema extraction complete: ${totalTables} tables, ${totalEnums} enums`);
 
 	return schemaInfo;
 }
@@ -154,6 +177,8 @@ async function generateModelFiles(
 	outputDir: string,
 	framework: FrameworkType
 ): Promise<void> {
+	logger.debug('Starting model file generation');
+
 	// Check if any tables have common fields that would benefit from BaseModel
 	const tablesWithCommonFields = Object.values(schemaInfo.tables).filter(table =>
 		shouldExtendBaseModel(table)
@@ -161,25 +186,35 @@ async function generateModelFiles(
 
 	const shouldCreateBaseModel = tablesWithCommonFields.length > 0;
 
+	if (shouldCreateBaseModel) {
+		logger.info(`${tablesWithCommonFields.length} tables will extend BaseModel`);
+	}
+
 	// Generate base model if needed
 	if (shouldCreateBaseModel) {
 		await generateBaseModelFile(outputDir, framework);
 	}
 
 	// Generate a file for each table
+	logger.debug(`Generating ${Object.keys(schemaInfo.tables).length} table model files`);
 	const tablePromises = Object.values(schemaInfo.tables).map(table =>
 		generateTableModelFile(table, schemaInfo, outputDir, shouldCreateBaseModel, framework)
 	);
 	await Promise.all(tablePromises);
 
 	// Generate a file for each enum
-	const enumPromises = schemaInfo.enums.map(enumTable =>
-		generateEnumFile(enumTable, outputDir, framework)
-	);
-	await Promise.all(enumPromises);
+	if (schemaInfo.enums.length > 0) {
+		logger.debug(`Generating ${schemaInfo.enums.length} enum files`);
+		const enumPromises = schemaInfo.enums.map(enumTable =>
+			generateEnumFile(enumTable, outputDir, framework)
+		);
+		await Promise.all(enumPromises);
+	}
 
 	// Generate an index file
 	await generateIndexFile(schemaInfo, shouldCreateBaseModel, outputDir, framework);
+
+	logger.debug('Model file generation complete');
 }
 
 /**
@@ -192,10 +227,15 @@ async function generateModelFiles(
  */
 async function generateBaseModelFile(outputDir: string, framework: FrameworkType): Promise<void> {
 	const baseModelPath = join(outputDir, 'base.model.ts');
+	logger.debug(`Generating base model file: ${baseModelPath}`);
+
 	const baseModelContent = generateBaseModelContent(framework);
 
 	if (await utils.writeToFile(baseModelPath, baseModelContent)) {
-		console.log(`Generated base model -> ${baseModelPath}`);
+		logger.debug(`Generated base model -> ${baseModelPath}`);
+	} else {
+		logger.error(`Failed to write base model to ${baseModelPath}`);
+		throw new Error(`Failed to generate base model file`);
 	}
 }
 
@@ -221,16 +261,22 @@ async function generateTableModelFile(
 	const fileName = utils.interfaceNameToFileName(interfaceName);
 	const filePath = join(outputDir, `${fileName}.ts`);
 
+	logger.debug(`Generating model for table: ${table.name} -> ${interfaceName}`);
+
 	// Check if this table should extend BaseModel
 	const extendsBase = shouldExtendBaseModelBool && shouldExtendBaseModel(table);
 
 	const fileContent = generateTypeScriptModelForTable(table, schemaInfo, extendsBase, framework);
+
 	if (await utils.writeToFile(filePath, fileContent)) {
 		if (extendsBase) {
-			console.log(`Generated model for ${table.name} (extends BaseModel) -> ${filePath}`);
+			logger.debug(`Generated model for ${table.name} (extends BaseModel) -> ${filePath}`);
 		} else {
-			console.log(`Generated model for ${table.name} -> ${filePath}`);
+			logger.debug(`Generated model for ${table.name} -> ${filePath}`);
 		}
+	} else {
+		logger.error(`Failed to write model file for ${table.name} to ${filePath}`);
+		throw new Error(`Failed to generate model file for table ${table.name}`);
 	}
 }
 
@@ -253,9 +299,15 @@ async function generateEnumFile(
 	const fileName = utils.interfaceNameToFileName(pascalCaseName);
 	const filePath = join(outputDir, `${fileName}.ts`);
 
+	logger.debug(`Generating enum for table: ${enumTable.name} -> ${pascalCaseName}`);
+
 	const fileContent = generateEnumFileContent(enumTable, framework);
+
 	if (await utils.writeToFile(filePath, fileContent)) {
-		console.log(`Generated enum for ${enumTable.name} -> ${filePath}`);
+		logger.debug(`Generated enum for ${enumTable.name} -> ${filePath}`);
+	} else {
+		logger.error(`Failed to write enum file for ${enumTable.name} to ${filePath}`);
+		throw new Error(`Failed to generate enum file for ${enumTable.name}`);
 	}
 }
 
@@ -276,9 +328,15 @@ async function generateIndexFile(
 	framework: FrameworkType
 ): Promise<void> {
 	const indexFilePath = join(outputDir, 'index.ts');
+	logger.debug(`Generating index file: ${indexFilePath}`);
+
 	const indexFileContent = generateIndexFileContent(schemaInfo, hasBaseModel, framework);
+
 	if (await utils.writeToFile(indexFilePath, indexFileContent)) {
-		console.log(`Generated index file -> ${indexFilePath}`);
+		logger.debug(`Generated index file -> ${indexFilePath}`);
+	} else {
+		logger.error(`Failed to write index file to ${indexFilePath}`);
+		throw new Error(`Failed to generate index file`);
 	}
 }
 
@@ -313,34 +371,42 @@ function generateIndexFileContent(
 	// Add base model export if it exists
 	if (hasBaseModel) {
 		output += `export { BaseModel, BaseTable } from './base.model';\n`;
+		logger.trace('Added BaseModel exports to index');
 	}
 
 	// Add exports for all tables
-	Object.values(schema.tables).forEach(table => {
-		const interfaceName = utils.tableNameToInterfaceName(table.name);
-		const fileName = utils.interfaceNameToFileName(interfaceName);
+	const tableCount = Object.keys(schema.tables).length;
+	if (tableCount > 0) {
+		Object.values(schema.tables).forEach(table => {
+			const interfaceName = utils.tableNameToInterfaceName(table.name);
+			const fileName = utils.interfaceNameToFileName(interfaceName);
 
-		if (framework === 'react') {
-			// For React, also export type aliases that are commonly used
-			output += `export type { ${interfaceName}, ${interfaceName}Table } from './${fileName}';\n`;
-		} else {
-			// For Angular, use regular exports
-			output += `export { ${interfaceName}, ${interfaceName}Table } from './${fileName}';\n`;
-		}
-	});
+			if (framework === 'react') {
+				// For React, also export type aliases that are commonly used
+				output += `export type { ${interfaceName}, ${interfaceName}Table } from './${fileName}';\n`;
+			} else {
+				// For Angular, use regular exports
+				output += `export { ${interfaceName}, ${interfaceName}Table } from './${fileName}';\n`;
+			}
+		});
+		logger.trace(`Added ${tableCount} table exports to index`);
+	}
 
 	// Add exports for all enums
-	schema.enums.forEach(enumTable => {
-		const enumName = enumTable.name.replace(/s$/, ''); // Remove trailing 's' if present
-		const pascalCaseName = enumName.charAt(0).toUpperCase() + enumName.slice(1);
-		const fileName = utils.interfaceNameToFileName(pascalCaseName);
+	if (schema.enums.length > 0) {
+		schema.enums.forEach(enumTable => {
+			const enumName = enumTable.name.replace(/s$/, ''); // Remove trailing 's' if present
+			const pascalCaseName = enumName.charAt(0).toUpperCase() + enumName.slice(1);
+			const fileName = utils.interfaceNameToFileName(pascalCaseName);
 
-		if (framework === 'react') {
-			output += `export { ${pascalCaseName} } from './${fileName}';\n`;
-		} else {
-			output += `export { ${pascalCaseName} } from './${fileName}';\n`;
-		}
-	});
+			if (framework === 'react') {
+				output += `export { ${pascalCaseName} } from './${fileName}';\n`;
+			} else {
+				output += `export { ${pascalCaseName} } from './${fileName}';\n`;
+			}
+		});
+		logger.trace(`Added ${schema.enums.length} enum exports to index`);
+	}
 
 	// Add framework-specific utility exports
 	if (framework === 'react') {
@@ -373,14 +439,21 @@ function generateIndexFileContent(
  * @internal
  */
 function shouldExtendBaseModel(table: TableDefinition): boolean {
-	console.log(`Checking if table ${table.name} should extend BaseModel...`);
+	logger.trace(`Checking if table ${table.name} should extend BaseModel...`);
+
 	// Check if table has id, created_at, and updated_at fields
 	const hasId = table.columns.some(col => col.name === 'id');
 	const hasCreatedAt = table.columns.some(col => col.name === 'created_at');
 	const hasUpdatedAt = table.columns.some(col => col.name === 'updated_at');
 
-	console.log(`Table ${table.name} has id: ${hasId}, created_at: ${hasCreatedAt}, updated_at: ${hasUpdatedAt}`);
-	return hasId && hasCreatedAt && hasUpdatedAt;
+	logger.trace(`Table ${table.name} has id: ${hasId}, created_at: ${hasCreatedAt}, updated_at: ${hasUpdatedAt}`);
+
+	const shouldExtend = hasId && hasCreatedAt && hasUpdatedAt;
+	if (shouldExtend) {
+		logger.debug(`Table ${table.name} will extend BaseModel`);
+	}
+
+	return shouldExtend;
 }
 
 /**
@@ -534,6 +607,7 @@ function generateTypeScriptModelForTable(
 	const imports = generateImports(table, schema, extendsBaseModel);
 	if (imports.length > 0) {
 		output += imports.join('\n') + '\n\n';
+		logger.trace(`Added ${imports.length} imports for ${table.name}`);
 	}
 
 	// Interface documentation
@@ -595,6 +669,7 @@ function generateTypeScriptModelForTable(
 		output += generateReactTypeUtilities(interfaceName);
 	}
 
+	logger.trace(`Generated complete model interface for ${table.name}`);
 	return output;
 }
 
@@ -646,6 +721,7 @@ function generateImports(
 	// Import BaseModel if extending
 	if (extendsBaseModel) {
 		imports.push(`import { BaseModel, BaseTable } from './base.model';`);
+		logger.trace(`Added BaseModel import for ${table.name}`);
 	}
 
 	// Import related models for foreign keys
@@ -656,6 +732,7 @@ function generateImports(
 		// and it's not self-referencing
 		if (schema.tables[fk.referenceTable] && fk.referenceTable !== table.name) {
 			imports.push(`import { ${refInterfaceName} } from './${utils.interfaceNameToFileName(refInterfaceName)}';`);
+			logger.trace(`Added foreign key import for ${table.name}: ${refInterfaceName}`);
 		}
 	});
 
@@ -673,6 +750,7 @@ function generateImports(
  */
 function generateModelProperties(table: TableDefinition, extendsBaseModel: boolean): string {
 	let output = '';
+	let propertyCount = 0;
 
 	table.columns.forEach(column => {
 		// Skip common fields if extending BaseModel (id, created_at, updated_at)
@@ -692,8 +770,10 @@ function generateModelProperties(table: TableDefinition, extendsBaseModel: boole
 
 		// Add the property in camelCase
 		output += `  ${camelCaseName}${optionalFlag}: ${column.tsType};\n`;
+		propertyCount++;
 	});
 
+	logger.trace(`Generated ${propertyCount} camelCase properties for ${table.name}`);
 	return output;
 }
 
@@ -708,6 +788,7 @@ function generateModelProperties(table: TableDefinition, extendsBaseModel: boole
  */
 function generateTableProperties(table: TableDefinition, extendsBaseModel: boolean): string {
 	let output = '';
+	let propertyCount = 0;
 
 	table.columns.forEach(column => {
 		// Skip common fields if extending BaseTable (id, created_at, updated_at)
@@ -725,8 +806,10 @@ function generateTableProperties(table: TableDefinition, extendsBaseModel: boole
 
 		// Add the property in snake_case (original DB column name)
 		output += `  ${column.name}${optionalFlag}: ${column.tsType};\n`;
+		propertyCount++;
 	});
 
+	logger.trace(`Generated ${propertyCount} snake_case properties for ${table.name}`);
 	return output;
 }
 
@@ -765,13 +848,17 @@ function generatePropertyComment(column: ColumnDefinition): string {
 function generateForeignKeyComments(table: TableDefinition): string {
 	let output = '';
 
-	table.foreignKeys.forEach(fk => {
-		const refInterfaceName = utils.tableNameToInterfaceName(fk.referenceTable);
-		const camelCaseColumnName = fk.column.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+	if (table.foreignKeys.length > 0) {
+		table.foreignKeys.forEach(fk => {
+			const refInterfaceName = utils.tableNameToInterfaceName(fk.referenceTable);
+			const camelCaseColumnName = fk.column.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 
-		output += `\n  /**\n   * Relation to ${fk.referenceTable}\n   * @see ${refInterfaceName}\n   */\n`;
-		output += `  // ${camelCaseColumnName} references ${fk.referenceTable}(${fk.referenceColumn})\n`;
-	});
+			output += `\n  /**\n   * Relation to ${fk.referenceTable}\n   * @see ${refInterfaceName}\n   */\n`;
+			output += `  // ${camelCaseColumnName} references ${fk.referenceTable}(${fk.referenceColumn})\n`;
+		});
+
+		logger.trace(`Generated ${table.foreignKeys.length} foreign key comments for ${table.name}`);
+	}
 
 	return output;
 }
@@ -799,12 +886,12 @@ export async function processModelFile(
 ): Promise<void> {
 	try {
 		// Validate file and create output directory
-		if (!validateFile(sqlFilePath, outputDir)) {
+		if (!(await validateFile(sqlFilePath, outputDir))) {
 			return;
 		}
 
-		console.log(`Processing file: ${sqlFilePath}`);
-		console.log(`Target framework: ${framework}`);
+		logger.info(`Processing file: ${sqlFilePath}`);
+		logger.info(`Target framework: ${framework}`);
 
 		const fileName = basename(sqlFilePath);
 
@@ -814,11 +901,12 @@ export async function processModelFile(
 		// Generate model files
 		await generateModelFiles(schemaInfo, outputDir, framework);
 
-		console.log(`\nSuccessfully generated TypeScript models for ${framework}.`);
-		console.log(`Generated ${Object.keys(schemaInfo.tables).length} table models.`);
-		console.log(`Generated ${schemaInfo.enums.length} enum models.`);
+		logger.info(`Successfully generated TypeScript models for ${framework}.`);
+		logger.info(`Generated ${Object.keys(schemaInfo.tables).length} table models.`);
+		logger.info(`Generated ${schemaInfo.enums.length} enum models.`);
 	} catch (error) {
-		console.error('Error processing file:', error);
+		logger.error('Error processing file:', error);
+		throw error;
 	}
 }
 
@@ -831,19 +919,19 @@ export async function processModelFile(
  * 
  * @internal
  */
-function validateFile(sqlFilePath: string, outputDir: string): boolean {
-	const sqlContent = utils.readFile(sqlFilePath);
-	if (!sqlContent) {
-		console.error(`Error: Could not read file ${sqlFilePath}.`);
+async function validateFile(sqlFilePath: string, outputDir: string): Promise<boolean> {
+	if (!(await utils.checkFileExists(sqlFilePath))) {
+		logger.error(`Could not read file ${sqlFilePath}.`);
 		return false;
 	}
 
 	// Create the output directory if it doesn't exist
-	if (!utils.ensureDir(outputDir)) {
-		console.error(`Error: Could not create output directory ${outputDir}.`);
+	if (!(await utils.ensureDir(outputDir))) {
+		logger.error(`Could not create output directory ${outputDir}.`);
 		return false;
 	}
 
+	logger.debug(`Validated file - input: ${sqlFilePath}, output: ${outputDir}`);
 	return true;
 }
 
@@ -863,22 +951,39 @@ async function extractSchemaFromFile(sqlFilePath: string, fileName: string): Pro
 		enums: []
 	};
 
+	logger.debug(`Extracting schema from single file: ${fileName}`);
+
 	const sqlContent = await utils.readFile(sqlFilePath);
-	if (!sqlContent) return schemaInfo;
+	if (!sqlContent) {
+		logger.warn(`Could not read content from ${fileName}`);
+		return schemaInfo;
+	}
 
 	// Parse CREATE TABLE statements
 	const { tables, enums } = utils.parseCreateTableStatements(sqlContent, fileName);
+	logger.debug(`Found ${tables.length} tables and ${enums.length} enums in ${fileName}`);
 
 	// Add tables to schema
 	tables.forEach(table => {
 		schemaInfo.tables[table.name] = table;
+		logger.trace(`Added table: ${table.name}`);
 	});
 
 	// Add enums
 	schemaInfo.enums.push(...enums);
+	if (enums.length > 0) {
+		logger.trace(`Added ${enums.length} enums: ${enums.map(e => e.name).join(', ')}`);
+	}
 
 	// Parse ALTER TABLE statements
-	utils.parseAlterTableStatements(sqlContent, schemaInfo, fileName);
+	const alterations = utils.parseAlterTableStatements(sqlContent, schemaInfo, fileName);
+	if (alterations.length > 0) {
+		logger.debug(`Applied ${alterations.length} table alterations from ${fileName}`);
+	}
+
+	const totalTables = Object.keys(schemaInfo.tables).length;
+	const totalEnums = schemaInfo.enums.length;
+	logger.info(`Schema extraction complete: ${totalTables} tables, ${totalEnums} enums`);
 
 	return schemaInfo;
 }

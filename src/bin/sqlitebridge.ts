@@ -4,11 +4,12 @@
  * SQLiteBridge CLI Tool - Universal Edition
  * 
  * Works with both Bun and Node.js automatically
- * Now with proper async config loading
+ * Now with proper async config loading and structured logging
  */
 
 import { Command } from "commander";
-import { initConfig, detectRuntime, getConfigHelp, type Config } from "../config.js";
+import { initConfig, detectRuntime, getConfigHelp, type Config } from "../config";
+import { configureLogger, LogLevel, createLogger } from "../logger";
 import {
 	generateSqliteMigrationsFromDir,
 	processModelFile,
@@ -17,41 +18,101 @@ import {
 	processServiceFile,
 	generateDexieMigrationFromDir,
 	generateDatabaseService
-} from "../generators/index.js";
-import * as utils from "../utils/index.js";
+} from "../generators/index";
+import * as utils from "../utils/index";
+
+// Create CLI logger
+const cliLogger = createLogger('CLI');
 
 // Detect and log runtime
 const runtime = detectRuntime();
 
 /**
- * Main CLI function with proper async handling
+ * Configure logger based on command line arguments
+ */
+function configureLoggerFromArgs(): void {
+	const args = process.argv;
+	const isVerbose = args.includes('--verbose') || args.includes('-v');
+	const isDebug = args.includes('--debug') || args.includes('-d');
+	const isQuiet = args.includes('--quiet') || args.includes('-q');
+
+	let logLevel = LogLevel.WARN; // Default: only warnings and errors
+
+	if (isQuiet) {
+		logLevel = LogLevel.ERROR; // Only critical errors
+	} else if (isDebug) {
+		logLevel = LogLevel.DEBUG; // Detailed debugging
+	} else if (isVerbose) {
+		logLevel = LogLevel.INFO; // Normal progress information
+	}
+
+	configureLogger({
+		level: logLevel,
+		useColors: !process.env.NO_COLOR && !process.env.CI,
+		showTimestamps: true,
+		showLevel: true,
+		showLoggerName: true
+	});
+}
+
+/**
+ * Main CLI function with proper async handling and logger configuration
  */
 async function main() {
+	// Configure logger first, before any other operations
+	configureLoggerFromArgs();
+
 	// Initialize configuration
 	let config: Config;
 	try {
 		config = await initConfig();
-		console.log(`SQLiteBridge running on: ${runtime}`);
+		cliLogger.info(`SQLiteBridge running on: ${runtime}`);
+		cliLogger.debug('Configuration loaded successfully');
 	} catch (error) {
-		console.error('Failed to load configuration:', error);
+		cliLogger.error('Failed to load configuration:', error);
 		process.exit(1);
 	}
 
 	// Destructure configuration values
 	const { migrationsPath, generatedPath, queriesPath, withDexie, frameworkConfig, migrationPattern, databaseName } = config;
 	const { models, migrations, services, dexie, hooks, providers } = generatedPath;
-	const { framework, servicePattern, generateHooks, generateProviders } = frameworkConfig
+	const { framework, servicePattern, generateHooks, generateProviders } = frameworkConfig;
 
 	/**
 	 * Create and configure the main program
 	 */
 	const program = new Command();
 
+	// Add global options to all commands
+	program
+		.option('-v, --verbose', 'Enable verbose logging')
+		.option('-d, --debug', 'Enable debug logging')
+		.option('-q, --quiet', 'Suppress all output except errors')
+		.hook('preAction', (thisCommand) => {
+			// Reconfigure logger if options are provided at command level
+			const opts = thisCommand.opts();
+			if (opts.verbose || opts.debug || opts.quiet) {
+				let newLevel = LogLevel.WARN;
+				if (opts.quiet) newLevel = LogLevel.ERROR;
+				else if (opts.debug) newLevel = LogLevel.DEBUG;
+				else if (opts.verbose) newLevel = LogLevel.INFO;
+
+				configureLogger({
+					level: newLevel,
+					useColors: !process.env.NO_COLOR && !process.env.CI,
+					showTimestamps: true,
+					showLevel: true,
+					showLoggerName: true
+				});
+			}
+		});
+
 	// Add version command
 	program.command('version')
 		.description('Display the version of SQLiteBridge')
 		.action(() => {
 			const packageInfo = utils.readPackageJson();
+			// Always show version info regardless of log level
 			console.log(`SQLiteBridge v${packageInfo.version} (${runtime})`);
 		});
 
@@ -59,9 +120,10 @@ async function main() {
 	program.command('config')
 		.description('Show configuration help and current settings')
 		.action(() => {
-			console.log(getConfigHelp());
+			// Always show config info regardless of log level
+			console.log(getConfigHelp()); // Keep console.log for help text formatting
 			console.log('\nCurrent Configuration:');
-			console.log(JSON.stringify(config, null, 2));
+			console.log(JSON.stringify(config, null, 2)); // Keep console.log for JSON pretty-print
 		});
 
 	/**
@@ -73,66 +135,81 @@ async function main() {
 		.option('--framework <framework>', 'Target framework (react|angular)', framework)
 		.option('--replace-database-service', 'Replace existing database service if it exists', false)
 		.action(async (options) => {
-			console.log('Starting generation of all artifacts...');
-			console.log(`Using migrations from: ${migrationsPath}`);
-			console.log(`Using queries from: ${queriesPath}`);
-			console.log(`Target framework: ${options.framework || framework}`);
+			cliLogger.info('🚀 Starting generation of all artifacts...');
+			cliLogger.info(`📁 Using migrations from: ${migrationsPath}`);
+			cliLogger.info(`📁 Using queries from: ${queriesPath}`);
+			cliLogger.info(`🎯 Target framework: ${options.framework || framework}`);
 
 			// Determine if Dexie should be generated
 			const optDexie = options.dexie ? options.dexie : withDexie;
 			if (optDexie) {
-				console.log('Dexie.js schema generation is enabled');
+				cliLogger.info('🌐 Dexie.js schema generation is enabled');
 			}
 
 			const replaceDatabaseService = options.replaceDatabaseService || false;
 
 			try {
+				// Track overall timing
+				const startTime = Date.now();
+
 				// Generate models first as they're needed by other generators
-				console.log('\nGenerating models...');
+				cliLogger.info('📝 Generating models...');
+				const modelStart = Date.now();
 				await processModelDirectory(migrationsPath, models, migrationPattern, framework);
+				cliLogger.debug(`Models generated in ${Date.now() - modelStart}ms`);
 
 				// Generate SQLite migrations
-				console.log('\nGenerating SQLite migrations...');
+				cliLogger.info('🔄 Generating SQLite migrations...');
+				const migrationStart = Date.now();
 				await generateSqliteMigrationsFromDir(migrationsPath, migrations, migrationPattern, framework);
+				cliLogger.debug(`Migrations generated in ${Date.now() - migrationStart}ms`);
 
 				// Generate services/hooks based on framework
-				console.log(`\nGenerating ${framework} ${servicePattern}...`);
+				cliLogger.info(`⚙️  Generating ${framework} ${servicePattern}...`);
+				const serviceStart = Date.now();
 				await processServiceDirectory(
 					queriesPath,
 					migrationsPath,
 					services,
 					optDexie,
 					migrationPattern,
-					framework, // Pass framework config
+					framework,
 					databaseName,
 					replaceDatabaseService
 				);
+				cliLogger.debug(`Services generated in ${Date.now() - serviceStart}ms`);
 
 				// Generate React-specific files if needed
 				if (framework === 'react') {
 					if (generateHooks && hooks) {
-						console.log('\nGenerating React hooks...');
+						cliLogger.info('🪝 Generating React hooks...');
 						// Implementation would generate hooks in the hooks directory
+						cliLogger.debug('React hooks generation completed');
 					}
 
 					if (generateProviders && providers) {
-						console.log('\nGenerating React providers...');
+						cliLogger.info('🔗 Generating React providers...');
 						// Implementation would generate providers in the providers directory
+						cliLogger.debug('React providers generation completed');
 					}
 				}
 
 				// Generate Dexie schema if enabled
 				if (optDexie) {
-					console.log('\nGenerating Dexie.js schema...');
+					cliLogger.info('🌐 Generating Dexie.js schema...');
+					const dexieStart = Date.now();
 					await generateDexieMigrationFromDir(migrationsPath, dexie, migrationPattern, framework);
+					cliLogger.debug(`Dexie schema generated in ${Date.now() - dexieStart}ms`);
 				}
 
-				console.log('\nAll artifacts generated successfully!');
-				console.log(`Framework: ${framework}`);
-				console.log(`Service pattern: ${servicePattern}`);
-				console.log(`Runtime: ${runtime}`);
+				const totalTime = Date.now() - startTime;
+				cliLogger.info('✅ All artifacts generated successfully!');
+				cliLogger.info(`📊 Framework: ${framework}`);
+				cliLogger.info(`📊 Service pattern: ${servicePattern}`);
+				cliLogger.info(`📊 Runtime: ${runtime}`);
+				cliLogger.info(`⏱️  Total time: ${totalTime}ms`);
 			} catch (error) {
-				console.error('Error generating artifacts:', error);
+				cliLogger.error('❌ Error generating artifacts:', error);
 				process.exit(1);
 			}
 		});
@@ -147,20 +224,29 @@ async function main() {
 		.action(async (options) => {
 			try {
 				const outputDir = options.outputDir || models;
-				console.log(`Generating models in: ${outputDir}`);
-				console.log(`Framework: ${framework}`);
+
+				// Always show start message
+				console.log(`🚀 Starting model generation...`);
+				cliLogger.info(`📝 Generating models in: ${outputDir}`);
+				cliLogger.info(`🎯 Framework: ${framework}`);
+
+				const startTime = Date.now();
 
 				if (options.file) {
-					console.log(`Processing single file: ${options.file}`);
+					cliLogger.info(`📄 Processing single file: ${options.file}`);
 					await processModelFile(options.file, outputDir, framework);
 				} else {
-					console.log(`Processing migrations directory: ${migrationsPath}`);
+					cliLogger.info(`📁 Processing migrations directory: ${migrationsPath}`);
 					await processModelDirectory(migrationsPath, outputDir, migrationPattern, framework);
 				}
 
-				console.log('Model generation completed successfully');
+				const duration = Date.now() - startTime;
+
+				// Always show completion message
+				console.log(`✅ Model generation completed successfully (${duration}ms)`);
 			} catch (error) {
-				console.error('Error generating models:', error);
+				console.log(`❌ Model generation failed`);
+				cliLogger.error('Error generating models:', error);
 				process.exit(1);
 			}
 		});
@@ -174,14 +260,21 @@ async function main() {
 		.action(async (options) => {
 			try {
 				const outputFile = options.outputFile || migrations;
-				console.log(`Generating migrations in: ${outputFile}`);
-				console.log(`Processing migrations directory: ${migrationsPath}`);
 
+				// Always show start message
+				console.log(`🚀 Starting migration generation...`);
+				cliLogger.info(`🔄 Generating migrations in: ${outputFile}`);
+				cliLogger.info(`📁 Processing migrations directory: ${migrationsPath}`);
+
+				const startTime = Date.now();
 				await generateSqliteMigrationsFromDir(migrationsPath, outputFile, migrationPattern, framework);
+				const duration = Date.now() - startTime;
 
-				console.log('Migration generation completed successfully');
+				// Always show completion message
+				console.log(`✅ Migration generation completed successfully (${duration}ms)`);
 			} catch (error) {
-				console.error('Error generating migrations:', error);
+				console.log(`❌ Migration generation failed`);
+				cliLogger.error('Error generating migrations:', error);
 				process.exit(1);
 			}
 		});
@@ -201,10 +294,14 @@ async function main() {
 				const targetFramework = options.framework || framework;
 				const replaceDatabaseService = options.replaceDatabaseService || false;
 
-				console.log(`Generating ${targetFramework} ${servicePattern} in: ${outputDir}`);
+				// Always show start message
+				console.log(`🚀 Starting service generation...`);
+				cliLogger.info(`⚙️  Generating ${targetFramework} ${servicePattern} in: ${outputDir}`);
+
+				const startTime = Date.now();
 
 				if (options.file) {
-					console.log(`Processing single query file: ${options.file}`);
+					cliLogger.info(`📄 Processing single query file: ${options.file}`);
 					await processServiceFile(
 						options.file,
 						migrationsPath,
@@ -214,8 +311,8 @@ async function main() {
 						framework
 					);
 				} else {
-					console.log(`Processing queries directory: ${queriesPath}`);
-					console.log(`Using migrations from: ${migrationsPath}`);
+					cliLogger.info(`📁 Processing queries directory: ${queriesPath}`);
+					cliLogger.info(`📁 Using migrations from: ${migrationsPath}`);
 					await processServiceDirectory(
 						queriesPath,
 						migrationsPath,
@@ -228,9 +325,13 @@ async function main() {
 					);
 				}
 
-				console.log(`${targetFramework} ${servicePattern} generation completed successfully`);
+				const duration = Date.now() - startTime;
+
+				// Always show completion message
+				console.log(`✅ Service generation completed successfully (${duration}ms)`);
 			} catch (error) {
-				console.error('Error generating services:', error);
+				console.log(`❌ Service generation failed`);
+				cliLogger.error('Error generating services:', error);
 				process.exit(1);
 			}
 		});
@@ -244,14 +345,21 @@ async function main() {
 		.action(async (options) => {
 			try {
 				const outputFile = options.outputFile || dexie;
-				console.log(`Generating Dexie schema in: ${outputFile}`);
-				console.log(`Processing migrations directory: ${migrationsPath}`);
 
+				// Always show start message
+				console.log(`🚀 Starting Dexie schema generation...`);
+				cliLogger.info(`🌐 Generating Dexie schema in: ${outputFile}`);
+				cliLogger.info(`📁 Processing migrations directory: ${migrationsPath}`);
+
+				const startTime = Date.now();
 				await generateDexieMigrationFromDir(migrationsPath, outputFile, migrationPattern, framework);
+				const duration = Date.now() - startTime;
 
-				console.log('Dexie schema generation completed successfully');
+				// Always show completion message
+				console.log(`✅ Dexie schema generation completed successfully (${duration}ms)`);
 			} catch (error) {
-				console.error('Error generating Dexie schema:', error);
+				console.log(`❌ Dexie schema generation failed`);
+				cliLogger.error('Error generating Dexie schema:', error);
 				process.exit(1);
 			}
 		});
@@ -272,19 +380,25 @@ async function main() {
 				const enableDexie = options.dexie !== undefined ? options.dexie : withDexie;
 				const replaceDatabaseService = options.replaceDatabaseService || false;
 
-				console.log(`Generating ${targetFramework} database service in: ${outputFile}`);
-				console.log(`Dexie support: ${enableDexie ? 'enabled' : 'disabled'}`);
+				// Always show start message
+				console.log(`🚀 Starting database service generation...`);
+				cliLogger.info(`🗄️  Generating ${targetFramework} database service in: ${outputFile}`);
+				cliLogger.info(`🌐 Dexie support: ${enableDexie ? 'enabled' : 'disabled'}`);
 
+				const startTime = Date.now();
 				const success = await generateDatabaseService(outputFile, targetFramework, enableDexie, databaseName, replaceDatabaseService);
+				const duration = Date.now() - startTime;
 
 				if (success) {
-					console.log('Database service generation completed successfully');
+					// Always show completion message
+					console.log(`✅ Database service generation completed successfully (${duration}ms)`);
 				} else {
-					console.error('Database service generation failed');
+					console.log(`❌ Database service generation failed`);
 					process.exit(1);
 				}
 			} catch (error) {
-				console.error('Error generating database service:', error);
+				console.log(`❌ Database service generation failed`);
+				cliLogger.error('Error generating database service:', error);
 				process.exit(1);
 			}
 		});
@@ -295,13 +409,19 @@ async function main() {
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-	console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+	cliLogger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+	process.exit(1);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+	cliLogger.error('Uncaught Exception:', error);
 	process.exit(1);
 });
 
 // Run the main function
 main().catch((error) => {
-	console.error('Fatal error:', error);
+	cliLogger.error('Fatal error:', error);
 	process.exit(1);
 });
 
@@ -309,15 +429,31 @@ main().catch((error) => {
 /*
 Usage Examples:
 
-Node.js:
-  npx sqlitebridge all --framework=react --dexie
+Standard usage (warnings and errors only):
+  npx sqlitebridge all
   npx sqlitebridge model
-  npx sqlitebridge service --framework=react
 
-Bun:
-  bunx sqlitebridge all --framework=react --dexie  
-  bunx sqlitebridge model
-  bunx sqlitebridge service --framework=react
+Verbose output (progress information):
+  npx sqlitebridge all --verbose
+  npx sqlitebridge model -v
+
+Debug output (detailed information):
+  npx sqlitebridge all --debug
+  npx sqlitebridge service -d
+
+Quiet mode (errors only):
+  npx sqlitebridge all --quiet
+  npx sqlitebridge migration -q
+
+Framework-specific:
+  npx sqlitebridge all --framework=react --verbose
+  npx sqlitebridge service --framework=angular --debug
+
+With Dexie support:
+  npx sqlitebridge all --dexie --verbose
+
+Bun usage:
+  bunx sqlitebridge all --framework=react --dexie --verbose
 
 Both will auto-detect runtime and use appropriate file operations!
 */
