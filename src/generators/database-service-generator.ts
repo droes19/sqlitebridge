@@ -178,8 +178,8 @@ function generateAngularImports(withDexie: boolean): string {
 		output += `import Dexie from 'dexie';\n`;
 	}
 
-	output += `import { DATABASE_CONFIG } from './database.config';\n`;
-	output += `import { validateMigrations } from './migration-helper';\n`;
+	output += `import { DATABASE_CONFIG } from '../database.config';\n`;
+	output += `import { validateMigrations } from '../migration-helper';\n`;
 	output += `import { ALL_MIGRATIONS, prepareMigrations } from '../migrations';\n`;
 	output += `import { BehaviorSubject } from 'rxjs';\n`;
 	output += `import { environment } from 'src/environments/environment';\n`;
@@ -762,7 +762,8 @@ function generateReactDevelopmentMethod(): string {
  */
 async function generateDatabaseConfigFile(outputDir: string, databaseName: string): Promise<boolean> {
 	try {
-		const configPath = join(outputDir, 'database.config.ts');
+		const newPath = outputDir.split('/').slice(0, -1).join('/');
+		const configPath = join(newPath, 'database.config.ts');
 
 		// Check if the file already exists
 		if (await utils.checkFileExists(configPath)) {
@@ -804,7 +805,8 @@ async function generateDatabaseConfigFile(outputDir: string, databaseName: strin
  */
 async function generateMigrationHelperFile(outputDir: string): Promise<boolean> {
 	try {
-		const helperPath = join(outputDir, 'migration-helper.ts');
+		const newPath = outputDir.split('/').slice(0, -1).join('/');
+		const helperPath = join(newPath, 'migration-helper.ts');
 
 		// Check if the file already exists
 		if (await utils.checkFileExists(helperPath)) {
