@@ -85,6 +85,7 @@ async function main() {
 			}
 
 			const replaceDatabaseService = options.replaceDatabaseService || false;
+
 			try {
 				// Generate models first as they're needed by other generators
 				console.log('\nGenerating models...');
@@ -102,13 +103,10 @@ async function main() {
 					services,
 					optDexie,
 					migrationPattern,
-					framework // Pass framework config
+					framework, // Pass framework config
+					databaseName,
+					replaceDatabaseService
 				);
-
-				// Generate database service if needed
-				console.log('\nChecking for database service...');
-				const databaseServicePath = `${services}/database.service.ts`;
-				await generateDatabaseService(databaseServicePath, framework, optDexie, databaseName, replaceDatabaseService);
 
 				// Generate React-specific files if needed
 				if (framework === 'react') {
@@ -196,10 +194,12 @@ async function main() {
 		.option('-f, --file <filepath>', 'Process a single query file')
 		.option('--output-dir <output-dir>', 'Directory for generated service files')
 		.option('--framework <framework>', 'Target framework (react|angular)', framework)
+		.option('--replace-database-service', 'Replace existing database service if it exists', false)
 		.action(async (options) => {
 			try {
 				const outputDir = options.outputDir || services;
 				const targetFramework = options.framework || framework;
+				const replaceDatabaseService = options.replaceDatabaseService || false;
 
 				console.log(`Generating ${targetFramework} ${servicePattern} in: ${outputDir}`);
 
@@ -222,7 +222,9 @@ async function main() {
 						outputDir,
 						withDexie,
 						migrationPattern,
-						framework
+						framework,
+						databaseName,
+						replaceDatabaseService
 					);
 				}
 

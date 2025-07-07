@@ -39,8 +39,9 @@ export async function generateDatabaseService(
 	replaceExisting: boolean = false
 ): Promise<boolean> {
 	try {
+		const fileExists = await utils.checkFileExists(outputPath);
 		// Check if the file already exists
-		if (await utils.checkFileExists(outputPath) && !replaceExisting) {
+		if (fileExists && !replaceExisting) {
 			console.log(`Database service already exists at ${outputPath}, skipping generation.`);
 			return true;
 		}
@@ -762,7 +763,8 @@ function generateReactDevelopmentMethod(): string {
  */
 async function generateDatabaseConfigFile(outputDir: string, databaseName: string): Promise<boolean> {
 	try {
-		const newPath = outputDir.split('/').slice(0, -1).join('/');
+		const separator = outputDir.includes('/') ? '/' : '\\';
+		const newPath = outputDir.split(separator).slice(0, -1).join(separator);
 		const configPath = join(newPath, 'database.config.ts');
 
 		// Check if the file already exists
@@ -805,7 +807,9 @@ async function generateDatabaseConfigFile(outputDir: string, databaseName: strin
  */
 async function generateMigrationHelperFile(outputDir: string): Promise<boolean> {
 	try {
-		const newPath = outputDir.split('/').slice(0, -1).join('/');
+
+		const separator = outputDir.includes('/') ? '/' : '\\';
+		const newPath = outputDir.split(separator).slice(0, -1).join(separator);
 		const helperPath = join(newPath, 'migration-helper.ts');
 
 		// Check if the file already exists

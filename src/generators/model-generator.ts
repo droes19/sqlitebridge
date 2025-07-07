@@ -113,12 +113,12 @@ async function extractSchemaFromMigrations(files: string[], directoryPath: strin
 	};
 
 	// Process each file in order
-	files.forEach(async (file) => {
+	for (const file of files) {
 		const filePath = join(directoryPath, file);
 		console.log(`Processing: ${file}`);
 
 		const sqlContent = await utils.readFile(filePath);
-		if (!sqlContent) return;
+		if (!sqlContent) continue;
 
 		// First, parse CREATE TABLE statements
 		const { tables, enums } = utils.parseCreateTableStatements(sqlContent, file);
@@ -135,7 +135,7 @@ async function extractSchemaFromMigrations(files: string[], directoryPath: strin
 
 		// Then, parse ALTER TABLE statements to update existing tables
 		utils.parseAlterTableStatements(sqlContent, schemaInfo, file);
-	});
+	}
 
 	return schemaInfo;
 }

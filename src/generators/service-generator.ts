@@ -45,7 +45,9 @@ export async function processServiceDirectory(
 	outputDir: string,
 	withDexie: boolean,
 	pattern: RegExp = /^V\d+__.+\.sql$/,
-	framework: FrameworkType
+	framework: FrameworkType,
+	databaseName?: string,
+	replaceExisting: boolean = false
 ): Promise<void> {
 	try {
 		// Check if directories exist
@@ -71,7 +73,7 @@ export async function processServiceDirectory(
 		// Check and generate database service if needed
 		const databaseServicePath = join(outputDir, 'database.service.ts');
 		console.log(`Checking for database service at: ${databaseServicePath}`);
-		await generateDatabaseService(databaseServicePath, framework, withDexie);
+		await generateDatabaseService(databaseServicePath, framework, withDexie, databaseName, replaceExisting);
 
 		// Get all SQL files in the queries directory
 		const queryFiles = await utils.getSqlFilesInDirectory(queriesDir);
@@ -504,7 +506,9 @@ export async function processServiceFile(
 	outputDir: string,
 	withDexie: boolean,
 	pattern: RegExp = /^V\d+__.+\.sql$/,
-	framework: FrameworkType
+	framework: FrameworkType,
+	databaseName?: string,
+	replaceExisting: boolean = false
 ): Promise<void> {
 	try {
 		// Validate input
@@ -518,7 +522,7 @@ export async function processServiceFile(
 		// Check and generate database service if needed
 		const databaseServicePath = join(outputDir, 'database.service.ts');
 		console.log(`Checking for database service at: ${databaseServicePath}`);
-		await generateDatabaseService(databaseServicePath, framework, withDexie);
+		await generateDatabaseService(databaseServicePath, framework, withDexie, databaseName, replaceExisting);
 
 		// Parse migration files to get table definitions
 		const schemaInfo = await parseSchemaFromMigrations(migrationsDir, pattern);

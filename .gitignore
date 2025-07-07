@@ -2,3 +2,4 @@ node_modules/
 dist/
 migrations/
 queries/
+sqlitebridge.config.json
