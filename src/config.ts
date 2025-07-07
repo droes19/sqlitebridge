@@ -156,6 +156,8 @@ export interface Config {
 	frameworkConfig: FrameworkConfig;
 	/** Regular expression pattern to match migration files */
 	migrationPattern: RegExp;
+	/** Optional database name for non-Dexie configurations */
+	databaseName?: string;
 }
 
 /**
@@ -178,7 +180,8 @@ export const defaultAngularConfig: Config = {
 		generateProviders: false,
 		useDependencyInjection: true,
 	},
-	migrationPattern: /^V\d+__.+\.sql$/
+	migrationPattern: /^V\d+__.+\.sql$/,
+	databaseName: 'my_database'
 };
 
 /**
@@ -203,7 +206,8 @@ export const defaultReactConfig: Config = {
 		generateProviders: true,
 		useDependencyInjection: false,
 	},
-	migrationPattern: /^V\d+__.+\.sql$/
+	migrationPattern: /^V\d+__.+\.sql$/,
+	databaseName: 'my_database'
 };
 
 /**

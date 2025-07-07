@@ -19,26 +19,28 @@ import { dirname, join } from 'node:path';
  * @param framework - Target framework ('angular' | 'react')
  * @param withDexie - Whether to include Dexie.js support
  * @param databaseName - Optional database name (defaults to 'your_database_name')
+ * @param replaceExisting - Whether to overwrite existing file if it exists
  * @returns Promise<boolean> - True if file was created or already exists, false on error
  * 
  * @example
  * ```typescript
  * // Generate Angular database service
- * await generateDatabaseService('./src/app/core/database/database.service.ts', 'angular', true);
+ * await generateDatabaseService('./src/app/core/database/database.service.ts', 'angular', true, 'my_app_db', true);
  * 
  * // Generate React database service with custom database name
- * await generateDatabaseService('./src/database/services/database.service.ts', 'react', true, 'my_app_db');
+ * await generateDatabaseService('./src/database/services/database.service.ts', 'react', true, 'my_app_db', true);
  * ```
  */
 export async function generateDatabaseService(
 	outputPath: string,
 	framework: FrameworkType,
 	withDexie: boolean = true,
-	databaseName?: string
+	databaseName?: string,
+	replaceExisting: boolean = false
 ): Promise<boolean> {
 	try {
 		// Check if the file already exists
-		if (await utils.checkFileExists(outputPath)) {
+		if (await utils.checkFileExists(outputPath) && !replaceExisting) {
 			console.log(`Database service already exists at ${outputPath}, skipping generation.`);
 			return true;
 		}
@@ -176,8 +178,8 @@ function generateAngularImports(withDexie: boolean): string {
 		output += `import Dexie from 'dexie';\n`;
 	}
 
-	output += `import { DATABASE_CONFIG } from '../database.config';\n`;
-	output += `import { validateMigrations } from '../migration-helper';\n`;
+	output += `import { DATABASE_CONFIG } from './database.config';\n`;
+	output += `import { validateMigrations } from './migration-helper';\n`;
 	output += `import { ALL_MIGRATIONS, prepareMigrations } from '../migrations';\n`;
 	output += `import { BehaviorSubject } from 'rxjs';\n`;
 	output += `import { environment } from 'src/environments/environment';\n`;

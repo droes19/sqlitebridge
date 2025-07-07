@@ -38,7 +38,7 @@ async function main() {
 	}
 
 	// Destructure configuration values
-	const { migrationsPath, generatedPath, queriesPath, withDexie, frameworkConfig, migrationPattern } = config;
+	const { migrationsPath, generatedPath, queriesPath, withDexie, frameworkConfig, migrationPattern, databaseName } = config;
 	const { models, migrations, services, dexie, hooks, providers } = generatedPath;
 	const { framework, servicePattern, generateHooks, generateProviders } = frameworkConfig
 
@@ -71,6 +71,7 @@ async function main() {
 		.description('Generate all outputs: models, migrations, services, and optionally Dexie schema')
 		.option('--dexie', 'Enable Dexie.js schema generation', false)
 		.option('--framework <framework>', 'Target framework (react|angular)', framework)
+		.option('--replace-database-service', 'Replace existing database service if it exists', false)
 		.action(async (options) => {
 			console.log('Starting generation of all artifacts...');
 			console.log(`Using migrations from: ${migrationsPath}`);
@@ -83,6 +84,7 @@ async function main() {
 				console.log('Dexie.js schema generation is enabled');
 			}
 
+			const replaceDatabaseService = options.replaceDatabaseService || false;
 			try {
 				// Generate models first as they're needed by other generators
 				console.log('\nGenerating models...');
@@ -106,7 +108,7 @@ async function main() {
 				// Generate database service if needed
 				console.log('\nChecking for database service...');
 				const databaseServicePath = `${services}/database.service.ts`;
-				await generateDatabaseService(databaseServicePath, framework, optDexie);
+				await generateDatabaseService(databaseServicePath, framework, optDexie, databaseName, replaceDatabaseService);
 
 				// Generate React-specific files if needed
 				if (framework === 'react') {
@@ -260,16 +262,18 @@ async function main() {
 		.option('--output-file <output-file>', 'Path for the generated database service file')
 		.option('--framework <framework>', 'Target framework (react|angular)', framework)
 		.option('--dexie', 'Enable Dexie.js support', withDexie)
+		.option('--replace-database-service', 'Replace existing database service if it exists', false)
 		.action(async (options) => {
 			try {
 				const outputFile = options.outputFile || `${services}/database.service.ts`;
 				const targetFramework = options.framework || framework;
 				const enableDexie = options.dexie !== undefined ? options.dexie : withDexie;
+				const replaceDatabaseService = options.replaceDatabaseService || false;
 
 				console.log(`Generating ${targetFramework} database service in: ${outputFile}`);
 				console.log(`Dexie support: ${enableDexie ? 'enabled' : 'disabled'}`);
 
-				const success = await generateDatabaseService(outputFile, targetFramework, enableDexie);
+				const success = await generateDatabaseService(outputFile, targetFramework, enableDexie, databaseName, replaceDatabaseService);
 
 				if (success) {
 					console.log('Database service generation completed successfully');

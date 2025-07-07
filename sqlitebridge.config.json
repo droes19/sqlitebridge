@@ -1,6 +1,0 @@
-{
-  "withDexie": true,
-  "frameworkConfig" : {
-	  "framework": "react"
-  }
-}
